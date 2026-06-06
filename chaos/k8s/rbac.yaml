@@ -1,0 +1,29 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: phoenix-chaos
+  namespace: phoenix-system
+  labels:
+    app: phoenix-chaos
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: phoenix-chaos
+rules:
+  - apiGroups: ["chaos-mesh.org"]
+    resources: ["podchaos", "networkchaos", "iochaos"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: phoenix-chaos
+subjects:
+  - kind: ServiceAccount
+    name: phoenix-chaos
+    namespace: phoenix-system
+roleRef:
+  kind: ClusterRole
+  name: phoenix-chaos
+  apiGroup: rbac.authorization.k8s.io
