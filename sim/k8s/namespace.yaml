@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: phoenix-system
+  labels:
+    environment: phoenix
+    app.kubernetes.io/managed-by: phoenix

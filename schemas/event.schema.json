@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/CodeBuildder/phoenix/schemas/event.schema.json",
+  "title": "Sentinel Platform Event (Phoenix M1 stub)",
+  "description": "Stub mirror of sentinel-platform's M0 shared event schema (`/schemas/event.schema.json`). Phoenix's M1 services (provisioning simulator, chaos engine) publish every lifecycle and fault transition in this shape so M2's agent and M3's dashboard have a stable contract to build against. THIS IS A STUB: once sentinel-platform/schemas/event.schema.json lands, this file should be deleted and Phoenix should depend on that one directly — field names and enums here are expected to converge, not diverge.",
+  "type": "object",
+  "required": ["event_type", "source_agent", "severity", "component", "timestamp", "payload"],
+  "properties": {
+    "event_type": {
+      "type": "string",
+      "description": "Dot-namespaced event identifier, e.g. `sim.lifecycle.transition`, `sim.fault.triggered`, `chaos.scenario.started`."
+    },
+    "source_agent": {
+      "type": "string",
+      "description": "Which Sentinel agent emitted this event.",
+      "enum": ["argus", "phoenix", "sentinel"]
+    },
+    "severity": {
+      "type": "string",
+      "enum": ["info", "low", "medium", "high", "critical"]
+    },
+    "component": {
+      "type": "string",
+      "description": "The resource, service, or subsystem this event is about, e.g. `sim.volume`, `sim.instance`, `chaos.scenario`."
+    },
+    "causality": {
+      "type": ["object", "null"],
+      "description": "Optional causal link to the event/scenario that triggered this one — lets M2 reconstruct \"X failed because Y\" chains.",
+      "properties": {
+        "caused_by": {
+          "type": ["string", "null"],
+          "description": "event_id or scenario_id of the upstream cause, if any."
+        },
+        "reason": {
+          "type": ["string", "null"]
+        }
+      }
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "RFC 3339 / ISO 8601 UTC timestamp."
+    },
+    "payload": {
+      "type": "object",
+      "description": "Event-specific structured data, e.g. resource id/state for lifecycle events, fault rule + target for fault events."
+    }
+  }
+}
