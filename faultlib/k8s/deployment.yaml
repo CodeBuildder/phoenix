@@ -1,0 +1,55 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: phoenix-faultlib
+  namespace: phoenix-system
+  labels:
+    app: phoenix-faultlib
+    app.kubernetes.io/managed-by: phoenix
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: phoenix-faultlib
+  template:
+    metadata:
+      labels:
+        app: phoenix-faultlib
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      containers:
+        - name: phoenix-faultlib
+          image: docker.io/library/phoenix-faultlib:latest
+          imagePullPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            allowPrivilegeEscalation: false
+          ports:
+            - containerPort: 8080
+              name: http
+          env:
+            - name: CHAOS_URL
+              value: "http://phoenix-chaos.phoenix-system.svc.cluster.local"
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+            limits:
+              cpu: "250m"
+              memory: "128Mi"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
