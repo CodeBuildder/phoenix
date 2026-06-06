@@ -1,0 +1,63 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: phoenix-sim
+  namespace: phoenix-system
+  labels:
+    app: phoenix-sim
+    app.kubernetes.io/managed-by: phoenix
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: phoenix-sim
+  template:
+    metadata:
+      labels:
+        app: phoenix-sim
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      containers:
+        - name: phoenix-sim
+          image: docker.io/library/phoenix-sim:latest
+          imagePullPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            allowPrivilegeEscalation: false
+          ports:
+            - containerPort: 8080
+              name: http
+          env:
+            - name: LOKI_URL
+              value: "http://loki.monitoring.svc.cluster.local:3100"
+            - name: LIFECYCLE_SPEED
+              value: "1.0"
+            - name: VOLUME_QUOTA
+              value: "50"
+            - name: SUBNET_QUOTA
+              value: "20"
+            - name: INSTANCE_QUOTA
+              value: "30"
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "256Mi"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
