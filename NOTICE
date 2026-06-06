@@ -1,0 +1,22 @@
+Phoenix — Chaos Engineering & Self-Healing Agent
+================================================
+
+Original design and architecture by Kaushikkumaran
+GitHub: https://github.com/CodeBuildder/phoenix
+First committed: June 2026
+
+This project represents original work including:
+- A synthetic infrastructure provisioning simulator (enterprise cloud-style volume/VLAN/
+  instance operations) that is intentionally faultable
+- A chaos-injection engine unifying Chaos Mesh faults and simulator faults behind one
+  control surface
+- An AI agent design for autonomous failure detection, diagnosis, healing, and
+  human-in-the-loop approval (LangGraph detect -> diagnose -> heal -> approve -> verify)
+- Blast-radius prediction, failure-mode taxonomy classification, and predictive-healing
+  with confidence scoring
+- A SOC/NOC-themed real-time resilience console UI design
+
+All architectural decisions are documented in [`sentinel-platform/docs`](https://github.com/CodeBuildder/sentinel-platform/tree/main/docs).
+Commit history on GitHub serves as timestamped proof of authorship.
+
+This notice must be retained in all copies and derivative works.
