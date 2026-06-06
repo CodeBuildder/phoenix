@@ -77,6 +77,71 @@ Open Grafana (`make grafana-ui` from argus-k8s, or `kubectl port-forward -n moni
 
 ---
 
+## 2. Chaos Injection Engine (`/chaos`) — backend
+
+This is the service that actually **triggers chaos** — it's the one the
+dashboard's "trigger" buttons (M3) and the agent (M2) will call to launch,
+watch, and stop scenarios. Everything it launches in the `chaos_mesh` domain
+is **real** (genuine pods get killed, real network latency gets injected on
+real nodes via Chaos Mesh — already installed in this cluster); the
+`simulator` domain drives faults into `/sim`'s fault-injectable lifecycle.
+See [chaos/README.md](chaos/README.md#real-vs-simulated--what-this-service-actually-touches)
+for the full real-vs-simulated breakdown.
+
+### Run it locally
+```bash
+cd chaos
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+cd src && uvicorn main:app --reload --port 8001
+```
+(Talking to Chaos Mesh from your laptop requires a working kubeconfig pointed
+at the cluster — same `kubectl config use-context argus` from the prerequisites.)
+
+### Trigger a real chaos scenario
+This is the actual "trigger button" action — a `POST /scenarios` call. Here's
+a mild, real one: 200ms of network latency injected onto `phoenix-sim`'s pod
+for 60 seconds via a genuine Chaos Mesh `NetworkChaos` experiment.
+```bash
+curl -X POST http://localhost:8001/scenarios -H "Content-Type: application/json" -d '{
+  "name": "demo-latency",
+  "domain": "chaos_mesh",
+  "fault_type": "network_latency",
+  "target": {"namespace": "phoenix-system", "label_selector": {"app": "phoenix-sim"}},
+  "duration_seconds": 60,
+  "params": {"latency": "200ms", "jitter": "50ms"}
+}'
+```
+Watch it land as a real object in the cluster, and check on it / stop it early
+through the same API the dashboard will use:
+```bash
+kubectl get networkchaos -n phoenix-system
+curl http://localhost:8001/scenarios/<id>            # live_status, read straight from Chaos Mesh
+curl -X POST http://localhost:8001/scenarios/<id>/stop
+```
+A `simulator`-domain scenario (e.g. inject `latency` into `/sim`'s volume
+creation) follows the exact same `POST /scenarios` shape — just
+`"domain": "simulator"`, `"fault_type": "latency"`, and a
+`{"resource_type": ..., "operation": ...}` target. See
+[chaos/README.md](chaos/README.md#api) for every fault type and target shape.
+
+### Deploy it to the cluster
+```bash
+cd chaos
+./deploy.sh
+```
+```bash
+kubectl port-forward -n phoenix-system svc/phoenix-chaos 8080:80
+kubectl logs -n phoenix-system -l app=phoenix-chaos -f
+```
+
+### See its events in Grafana
+```
+{app="phoenix-chaos"} | json | event_type != ""
+```
+
+---
+
 ## What's coming
 
 The rest of M1 — and the agentic and frontend pieces — aren't built yet, so
@@ -85,11 +150,10 @@ as it lands:
 
 | Piece | What it'll be | Status |
 |---|---|---|
-| `/chaos` — Chaos injection engine | Wraps Chaos Mesh + the simulator's fault hooks behind one control surface | In progress |
 | Fault library & taxonomy classifier | Classifies failures from real observed events | Pending |
-| Blast-radius graph builder | Dependency graph from live cluster topology | Pending |
+| Blast-radius graph builder | Dependency graph from live cluster topology — what `Scenario.blast_radius` is waiting on | Pending |
 | `/agent` — LangGraph agent (backend) | detect → diagnose → heal → approve → verify, via Claude + MCP tools | Not started (M2) |
-| Dashboard (frontend) | React + Vite + Tailwind console — chaos grid, blast-radius graph, healing pipeline | Not started (M3) |
+| Dashboard (frontend) | React + Vite + Tailwind console — the "trigger" buttons that call `/chaos`'s `POST /scenarios` directly, plus the blast-radius graph and healing pipeline | Not started (M3) |
 
 See the [module status table](README.md#status) for the up-to-date picture.
 
