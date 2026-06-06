@@ -59,7 +59,7 @@ cluster (and the agent) can recover from it.
 |---|---|---|
 | M1.1 — Provisioning Simulator | Faultable volume/subnet/instance lifecycle APIs ([`/sim`](sim/)) | Complete |
 | M1.2 — Chaos Injection Engine | Chaos Mesh wrapper + simulator fault control surface ([`/chaos`](chaos/)) | Complete |
-| M1.3 — Fault Library & Taxonomy Classifier | Failure-mode classification from observed events | Pending |
+| M1.3 — Fault Library & Taxonomy Classifier | Failure-mode classification from observed events ([`/faultlib`](faultlib/)) | Complete |
 | M1.4 — Blast-Radius Graph Builder | Dependency graph from live cluster topology | Pending |
 | M2 — Phoenix Agent | LangGraph detect → diagnose → heal → approve → verify | Not started |
 | M3 — Phoenix Dashboard | React console, blast-radius graph, healing pipeline | Not started |
