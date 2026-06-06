@@ -67,6 +67,12 @@ cluster (and the agent) can recover from it.
 See the [milestones](https://github.com/CodeBuildder/phoenix/milestones) for the full
 build sequence and issue backlog.
 
+## Local setup
+
+See **[setup.md](setup.md)** for the full quick-start guide — copy-paste
+commands to run the Provisioning Simulator locally or deploy it to the
+cluster, plus what's coming next as the rest of M1 lands.
+
 ## Stack
 
 FastAPI + LangGraph agent, Claude API for reasoning, MCP tools for cluster actions
