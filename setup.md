@@ -142,6 +142,51 @@ kubectl logs -n phoenix-system -l app=phoenix-chaos -f
 
 ---
 
+## 3. Fault Library & Taxonomy Classifier (`/faultlib`) — backend
+
+This is the service that turns raw chaos history into something the agent
+(M2) and dashboard (M3) can act on: a catalog of every fault `/chaos` can
+launch (mechanism, blast-radius shape, typical symptoms), a deterministic
+classifier that labels each one's failure mode, and a live ranking of which
+components have actually experienced which failure modes — computed fresh,
+on every request, from `/chaos`'s real scenario history. Nothing here is
+cached or seeded: an empty `/chaos` produces an empty ranking. See
+[faultlib/README.md](faultlib/README.md#whats-real-here-whats-reference-data-and-why-nothing-here-can-drift-into-fabrication)
+for exactly how each of its three outputs earns its trustworthiness.
+
+### Run it locally
+```bash
+cd faultlib
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+cd src && uvicorn main:app --reload --port 8002
+```
+
+### Try it out
+```bash
+curl http://localhost:8002/catalog                                          # the full fault library
+curl http://localhost:8002/catalog/chaos_mesh/pod_kill                      # mechanism, blast radius, symptoms
+curl -X POST "http://localhost:8002/classify?domain=chaos_mesh&fault_type=network_latency"
+curl http://localhost:8002/rankings                                         # live, off /chaos's real scenario history
+```
+Launch a real scenario through `/chaos` (see section 2's "Trigger a real
+chaos scenario") and call `/rankings` again — the new scenario shows up in
+the tally immediately, because every call recomputes it from scratch.
+
+### Deploy it to the cluster
+```bash
+cd faultlib
+./deploy.sh
+```
+No RBAC needed — unlike `/chaos`, this service never touches the Kubernetes
+API; its one dependency is plain HTTP to `/chaos`.
+```bash
+kubectl port-forward -n phoenix-system svc/phoenix-faultlib 8080:80
+kubectl logs -n phoenix-system -l app=phoenix-faultlib -f
+```
+
+---
+
 ## What's coming
 
 The rest of M1 — and the agentic and frontend pieces — aren't built yet, so
@@ -150,7 +195,6 @@ as it lands:
 
 | Piece | What it'll be | Status |
 |---|---|---|
-| Fault library & taxonomy classifier | Classifies failures from real observed events | Pending |
 | Blast-radius graph builder | Dependency graph from live cluster topology — what `Scenario.blast_radius` is waiting on | Pending |
 | `/agent` — LangGraph agent (backend) | detect → diagnose → heal → approve → verify, via Claude + MCP tools | Not started (M2) |
 | Dashboard (frontend) | React + Vite + Tailwind console — the "trigger" buttons that call `/chaos`'s `POST /scenarios` directly, plus the blast-radius graph and healing pipeline | Not started (M3) |
