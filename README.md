@@ -61,7 +61,7 @@ cluster (and the agent) can recover from it.
 | M1.2 — Chaos Injection Engine | Chaos Mesh wrapper + simulator fault control surface ([`/chaos`](chaos/)) | Complete |
 | M1.3 — Fault Library & Taxonomy Classifier | Failure-mode classification from observed events ([`/faultlib`](faultlib/)) | Complete |
 | M1.4 — Blast-Radius Graph Builder | Dependency graph from live k8s + Hubble topology ([`/graph`](graph/)) | Complete |
-| M2 — Phoenix Agent | LangGraph detect → diagnose → heal → approve → verify | In progress |
+| M2 — Phoenix Agent | LangGraph detect → diagnose → heal → approve → verify state machine, predictive-healing memory store, event publisher | Complete |
 | M3 — Phoenix Dashboard | React console, blast-radius graph, healing pipeline swim lanes, incident feed, fleet weakness map | Complete |
 
 See the [milestones](https://github.com/CodeBuildder/phoenix/milestones) for the full

@@ -23,6 +23,17 @@ function incidentSeverity(affected: AffectedNode[]): 'critical' | 'high' | 'medi
   if (affected.some(n => n.severity === 'medium')) return 'medium'
   return 'low'
 }
+
+// Derive impact level from catalog taxonomy_category — what kind of fault it is,
+// independent of how far the blast radius actually propagated.
+function catalogImpact(faultType: string, catalog: FaultCatalogEntry[]): 'critical' | 'high' | 'medium' | 'low' {
+  const entry = catalog.find(e => e.fault_type === faultType)
+  if (!entry) return 'low'
+  const cat = entry.taxonomy_category
+  if (cat === 'cascading' || cat === 'network-partition') return 'high'
+  if (cat === 'resource-exhaustion') return 'medium'
+  return 'low'
+}
 function needsHuman(sev: string, affected: AffectedNode[]) {
   return sev === 'critical' || (sev === 'high' && affected.length >= 3)
 }
@@ -731,6 +742,7 @@ function IncidentCard({ scenario, catalog, onStop }: {
   const affected    = blastData?.affected_nodes ?? []
   const matched     = blastData?.matched_nodes  ?? []
   const severity    = affected.length > 0 ? incidentSeverity(affected) : 'low'
+  const faultImpact = catalogImpact(scenario.fault_type, catalog)
   const human       = needsHuman(severity, affected)
   const blastLoaded = !blastLoading && blastData !== undefined
   const channels    = loadChannels()
@@ -776,7 +788,7 @@ function IncidentCard({ scenario, catalog, onStop }: {
               <span className="text-sm font-mono font-bold text-slate-100">{targetService}</span>
               <span className="text-slate-600">·</span>
               <span className="text-sm font-mono text-slate-300">{scenario.fault_type}</span>
-              <span className={`px-1.5 py-0.5 rounded border text-[10px] font-mono uppercase tracking-wide ${SEV_BADGE[severity]}`}>{severity}</span>
+              <span className={`px-1.5 py-0.5 rounded border text-[10px] font-mono uppercase tracking-wide ${SEV_BADGE[faultImpact]}`}>{faultImpact}</span>
               <span className="px-1.5 py-0.5 rounded bg-elevated border border-border text-[10px] font-mono text-slate-500">{scenario.status}</span>
               {human && isRunning && (
                 <span className="flex items-center gap-1 px-2 py-0.5 rounded bg-danger/15 border border-danger/30 text-[10px] font-mono text-danger font-bold">

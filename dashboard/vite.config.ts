@@ -6,6 +6,7 @@ import react from '@vitejs/plugin-react'
 //   kubectl port-forward -n phoenix-system svc/phoenix-chaos   8082:80
 //   kubectl port-forward -n phoenix-system svc/phoenix-faultlib 8081:80
 //   kubectl port-forward -n phoenix-system svc/phoenix-sim     8083:80
+//   kubectl port-forward -n phoenix-system svc/phoenix-agent   8084:80
 export default defineConfig({
   plugins: [react()],
   server: {
@@ -29,6 +30,11 @@ export default defineConfig({
       '/api/sim': {
         target: 'http://localhost:8083',
         rewrite: path => path.replace(/^\/api\/sim/, ''),
+        changeOrigin: true,
+      },
+      '/api/agent': {
+        target: 'http://localhost:8084',
+        rewrite: path => path.replace(/^\/api\/agent/, ''),
         changeOrigin: true,
       },
     },

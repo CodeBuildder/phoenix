@@ -1,14 +1,16 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import useSWR from 'swr'
 import { fetchScenarios, stopScenario } from '../api/chaos'
 import { fetchBlastRadius } from '../api/graph'
 import { fetchRankings } from '../api/faultlib'
+import { fetchRuns, approveAction, rejectAction, type AgentRun, type AgentNode } from '../api/agent'
 import type { Scenario } from '../types/chaos'
 import type { BlastRadiusResponse, AffectedNode } from '../types/graph'
 import type { ComponentRanking } from '../types/faultlib'
 import {
   Activity, AlertTriangle, CheckCircle2, ChevronRight, Clock,
-  Eye, Loader2, RefreshCw, Shield, Square, Zap,
+  Loader2, RefreshCw, Shield, Square, Zap, ThumbsUp, ThumbsDown,
+  Brain, Wrench,
 } from 'lucide-react'
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -46,24 +48,38 @@ function needsHuman(sev: string, affected: AffectedNode[]) {
 
 type Lane = 'detect' | 'diagnose' | 'heal' | 'approve' | 'verify'
 
+// Map real agent node → swim-lane column
+const AGENT_NODE_TO_LANE: Record<AgentNode, Lane> = {
+  detect:    'detect',
+  diagnose:  'diagnose',
+  heal_plan: 'heal',
+  execute:   'heal',
+  approve:   'approve',
+  verify:    'verify',
+  report:    'verify',
+  done:      'verify',
+  aborted:   'verify',
+  error:     'verify',
+}
+
 function computeLane(
   scenario: Scenario,
   blast: BlastRadiusResponse | undefined,
   blastLoading: boolean,
+  agentRun: AgentRun | null,
 ): Lane {
+  // Real agent data takes priority over timing heuristic
+  if (agentRun) return AGENT_NODE_TO_LANE[agentRun.node] ?? 'detect'
+
+  // Heuristic fallback (no agent run yet)
   if (['completed', 'stopped', 'failed'].includes(scenario.status)) return 'verify'
   if (scenario.status !== 'running') return 'detect'
   if (blastLoading || blast === undefined) return 'detect'
 
   const affected = blast.affected_nodes ?? []
   const sev      = incidentSeverity(affected)
-  const human    = needsHuman(sev, affected)
-
-  if (human) return 'approve'
-
-  // Diagnose for first 30s (Phoenix is analyzing), then Heal
-  const age = elapsed(scenario.started_at)
-  return age < 30 ? 'diagnose' : 'heal'
+  if (needsHuman(sev, affected)) return 'approve'
+  return elapsed(scenario.started_at) < 30 ? 'diagnose' : 'heal'
 }
 
 const LANE_META: Record<Lane, {
@@ -114,8 +130,6 @@ const SEV_TEXT: Record<string, string> = {
   critical: 'text-danger', high: 'text-warning', medium: 'text-accent', low: 'text-slate-400',
 }
 
-// ── service name extraction ───────────────────────────────────────────────────
-
 function extractServiceName(scenario: Scenario): string {
   const labels = scenario.target.label_selector ?? {}
   const app = labels['app'] ?? labels['name'] ?? labels['component'] ?? null
@@ -125,8 +139,6 @@ function extractServiceName(scenario: Scenario): string {
     return parts.slice(1, -1).join('-').replace(/-\d{10,}$/, '')
   return scenario.name
 }
-
-// ── live elapsed ticker ───────────────────────────────────────────────────────
 
 function useTick(scenario: Scenario) {
   const [, forceUpdate] = useState(0)
@@ -139,8 +151,20 @@ function useTick(scenario: Scenario) {
 
 // ── lane card ─────────────────────────────────────────────────────────────────
 
-function LaneCard({ scenario, column }: { scenario: Scenario; column: Lane }) {
-  const [stopping, setStopping] = useState(false)
+function LaneCard({
+  scenario,
+  column,
+  agentRun,
+  onMutate,
+}: {
+  scenario:  Scenario
+  column:    Lane
+  agentRun:  AgentRun | null
+  onMutate:  () => void
+}) {
+  const [stopping, setStopping]   = useState(false)
+  const [approving, setApproving] = useState(false)
+  const [rejecting, setRejecting] = useState(false)
   useTick(scenario)
 
   const target = scenario.target
@@ -150,19 +174,30 @@ function LaneCard({ scenario, column }: { scenario: Scenario; column: Lane }) {
     { refreshInterval: scenario.status === 'running' ? 10_000 : 0, dedupingInterval: 5_000 },
   )
 
-  const currentLane = computeLane(scenario, blast, blastLoading)
+  const currentLane = computeLane(scenario, blast, blastLoading, agentRun)
   if (currentLane !== column) return null
 
-  const affected = blast?.affected_nodes ?? []
-  const matched  = blast?.matched_nodes  ?? []
-  const sev      = affected.length > 0 ? incidentSeverity(affected) : 'low'
-  const human    = needsHuman(sev, affected)
-  const age      = elapsed(scenario.started_at)
+  const affected  = blast?.affected_nodes ?? []
+  const matched   = blast?.matched_nodes  ?? []
+  const sev       = affected.length > 0 ? incidentSeverity(affected) : 'low'
+  const human     = needsHuman(sev, affected)
+  const age       = elapsed(scenario.started_at)
   const remaining = scenario.duration_seconds ? Math.max(scenario.duration_seconds - age, 0) : null
-  const service  = extractServiceName(scenario)
-  const m        = mttr(scenario)
+  const service   = extractServiceName(scenario)
+  const m         = agentRun?.mttr_seconds ?? mttr(scenario)
+  const meta      = LANE_META[column]
 
-  const meta = LANE_META[column]
+  const diagnosis  = agentRun?.diagnosis
+  const isPending  = agentRun?.approval_status === 'pending'
+
+  async function handleApprove() {
+    setApproving(true)
+    try { await approveAction(scenario.id); onMutate() } finally { setApproving(false) }
+  }
+  async function handleReject() {
+    setRejecting(true)
+    try { await rejectAction(scenario.id); onMutate() } finally { setRejecting(false) }
+  }
 
   return (
     <div className={`rounded-lg border bg-card p-3 space-y-2.5 text-[11px] font-mono ${meta.border}`}>
@@ -183,111 +218,217 @@ function LaneCard({ scenario, column }: { scenario: Scenario; column: Lane }) {
         )}
       </div>
 
-      {/* lane-specific content */}
-
+      {/* ── DETECT ──────────────────────────────────────────────────── */}
       {column === 'detect' && (
         <div className="flex items-center gap-1.5 text-slate-600">
           <Loader2 className="w-3 h-3 animate-spin" />
-          Scanning topology for blast radius…
+          {agentRun ? 'Phoenix Agent detecting…' : 'Scanning topology for blast radius…'}
         </div>
       )}
 
+      {/* ── DIAGNOSE ────────────────────────────────────────────────── */}
       {column === 'diagnose' && (
         <div className="space-y-1.5">
-          <p className="text-violet/80">Blast radius mapped</p>
-          {affected.length > 0 ? (
+          {diagnosis ? (
             <>
-              <p className="text-slate-500">
-                {affected.length} downstream service{affected.length !== 1 ? 's' : ''} at risk:
+              <div className="flex items-center gap-1.5 text-violet">
+                <Brain className="w-3 h-3" />
+                Causal chain
+              </div>
+              <p className="text-slate-400 text-[10px] leading-relaxed border-l-2 border-violet/30 pl-2">
+                {diagnosis.causal_chain}
               </p>
-              {affected.slice(0, 3).map(n => (
-                <div key={n.node_id} className="flex items-center gap-1.5">
-                  <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${
-                    n.severity === 'high' ? 'bg-danger' : n.severity === 'medium' ? 'bg-warning' : 'bg-accent'
-                  }`} />
-                  <span className="text-slate-400 truncate">{n.name}</span>
-                  <span className={`ml-auto shrink-0 ${SEV_TEXT[n.severity]}`}>{n.severity}</span>
-                </div>
-              ))}
+              <div className="flex items-center gap-1.5 pt-1 border-t border-border/40">
+                <span className="text-slate-600">→</span>
+                <span className="text-accent">{diagnosis.recommended_action}</span>
+                <span className={`ml-auto text-[9px] uppercase font-bold ${
+                  diagnosis.risk === 'high' ? 'text-danger' : 'text-accent'
+                }`}>
+                  {diagnosis.risk}-risk
+                </span>
+              </div>
             </>
           ) : (
-            <p className="text-accent text-[10px]">✓ No downstream impact — fault contained</p>
+            <>
+              <p className="text-violet/80">Blast radius mapped</p>
+              {affected.length > 0 ? (
+                <>
+                  <p className="text-slate-500">
+                    {affected.length} downstream service{affected.length !== 1 ? 's' : ''} at risk:
+                  </p>
+                  {affected.slice(0, 3).map(n => (
+                    <div key={n.node_id} className="flex items-center gap-1.5">
+                      <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                        n.severity === 'high' ? 'bg-danger' : n.severity === 'medium' ? 'bg-warning' : 'bg-accent'
+                      }`} />
+                      <span className="text-slate-400 truncate">{n.name}</span>
+                      <span className={`ml-auto shrink-0 ${SEV_TEXT[n.severity]}`}>{n.severity}</span>
+                    </div>
+                  ))}
+                </>
+              ) : (
+                <p className="text-accent text-[10px]">✓ No downstream impact — fault contained</p>
+              )}
+              <div className="flex items-center gap-1.5 text-slate-700 border-t border-border/40 pt-1.5 mt-1">
+                <Loader2 className="w-3 h-3 animate-spin" />
+                Claude analyzing causal chain…
+              </div>
+            </>
           )}
-          <div className="flex items-center gap-1.5 text-slate-700 border-t border-border/40 pt-1.5 mt-1">
-            <Zap className="w-3 h-3" />
-            M2: Causal chain analysis will appear here
-          </div>
         </div>
       )}
 
+      {/* ── HEAL ────────────────────────────────────────────────────── */}
       {column === 'heal' && (
         <div className="space-y-1.5">
-          <div className="flex items-center gap-1.5 text-accent">
-            <Activity className="w-3 h-3" />
-            Phoenix Agent monitoring
-          </div>
-          {matched.length > 0 && (
-            <p className="text-slate-600">
-              {matched.length} service{matched.length !== 1 ? 's' : ''} targeted · blast contained
-            </p>
+          {agentRun?.node === 'execute' ? (
+            <>
+              <div className="flex items-center gap-1.5 text-accent">
+                <Wrench className="w-3 h-3 animate-pulse" />
+                Executing remediation…
+              </div>
+              {diagnosis && (
+                <p className="text-slate-500">
+                  Action: <span className="text-accent">{diagnosis.recommended_action}</span>
+                  {' → '}<span className="text-slate-400">{diagnosis.action_target}</span>
+                </p>
+              )}
+            </>
+          ) : agentRun?.action_result ? (
+            <>
+              <div className="flex items-center gap-1.5 text-accent">
+                <CheckCircle2 className="w-3 h-3" />
+                Action complete
+              </div>
+              <p className="text-slate-500 text-[10px] leading-relaxed border-l-2 border-accent/30 pl-2">
+                {agentRun.action_result}
+              </p>
+            </>
+          ) : (
+            <>
+              <div className="flex items-center gap-1.5 text-accent">
+                <Activity className="w-3 h-3" />
+                Phoenix Agent monitoring
+              </div>
+              {diagnosis && (
+                <p className="text-slate-500">
+                  Planned: <span className="text-accent">{diagnosis.recommended_action}</span>
+                </p>
+              )}
+              {remaining !== null && (
+                <p className="text-slate-600">Auto-stops in {fmtSec(remaining)}</p>
+              )}
+              {matched.length > 0 && (
+                <p className="text-slate-600">{matched.length} service{matched.length !== 1 ? 's' : ''} targeted</p>
+              )}
+            </>
           )}
-          {remaining !== null && (
-            <p className="text-slate-600">Auto-stops in {fmtSec(remaining)}</p>
-          )}
-          <div className="flex items-center gap-1.5 text-slate-700 border-t border-border/40 pt-1.5 mt-1">
-            <Zap className="w-3 h-3" />
-            M2: Remediation actions will appear here
-          </div>
         </div>
       )}
 
+      {/* ── APPROVE ─────────────────────────────────────────────────── */}
       {column === 'approve' && (
         <div className="space-y-2">
-          <div className="flex items-center gap-1.5 text-danger">
-            <AlertTriangle className="w-3 h-3" />
-            Blast radius is {sev} — operator required
-          </div>
-          {affected.length > 0 && (
-            <p className="text-slate-500">
-              {affected.length} service{affected.length !== 1 ? 's' : ''} at risk
-            </p>
-          )}
-          {human && (
-            <button
-              onClick={async () => {
-                setStopping(true)
-                await stopScenario(scenario.id)
-                setStopping(false)
-              }}
-              disabled={stopping}
-              className="w-full flex items-center justify-center gap-1.5 py-1.5 rounded bg-danger/10 border border-danger/30 text-danger hover:bg-danger/20 transition-colors disabled:opacity-50"
-            >
-              {stopping ? <Loader2 className="w-3 h-3 animate-spin" /> : <Square className="w-3 h-3" />}
-              Stop fault
-            </button>
+          {isPending && diagnosis ? (
+            <>
+              <div className="flex items-center gap-1.5 text-danger">
+                <AlertTriangle className="w-3 h-3" />
+                High-risk action — approval required
+              </div>
+              <div className="space-y-1 text-[10px] text-slate-500 border-l-2 border-danger/30 pl-2">
+                <p>Action: <span className="text-slate-300">{diagnosis.recommended_action}</span></p>
+                <p>Target: <span className="text-slate-300">{diagnosis.action_target}</span></p>
+                <p className="text-slate-600">{diagnosis.rationale}</p>
+              </div>
+              <div className="flex gap-1.5 pt-1">
+                <button
+                  onClick={handleApprove}
+                  disabled={approving}
+                  className="flex-1 flex items-center justify-center gap-1 py-1.5 rounded bg-accent/10 border border-accent/30 text-accent hover:bg-accent/20 transition-colors disabled:opacity-50"
+                >
+                  {approving ? <Loader2 className="w-3 h-3 animate-spin" /> : <ThumbsUp className="w-3 h-3" />}
+                  Approve
+                </button>
+                <button
+                  onClick={handleReject}
+                  disabled={rejecting}
+                  className="flex-1 flex items-center justify-center gap-1 py-1.5 rounded bg-danger/10 border border-danger/30 text-danger hover:bg-danger/20 transition-colors disabled:opacity-50"
+                >
+                  {rejecting ? <Loader2 className="w-3 h-3 animate-spin" /> : <ThumbsDown className="w-3 h-3" />}
+                  Reject
+                </button>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="flex items-center gap-1.5 text-danger">
+                <AlertTriangle className="w-3 h-3" />
+                {agentRun ? 'Awaiting approval decision' : `Blast radius is ${sev} — operator required`}
+              </div>
+              {affected.length > 0 && (
+                <p className="text-slate-500">
+                  {affected.length} service{affected.length !== 1 ? 's' : ''} at risk
+                </p>
+              )}
+              {!agentRun && human && (
+                <button
+                  onClick={async () => {
+                    setStopping(true)
+                    await stopScenario(scenario.id)
+                    setStopping(false)
+                  }}
+                  disabled={stopping}
+                  className="w-full flex items-center justify-center gap-1.5 py-1.5 rounded bg-danger/10 border border-danger/30 text-danger hover:bg-danger/20 transition-colors disabled:opacity-50"
+                >
+                  {stopping ? <Loader2 className="w-3 h-3 animate-spin" /> : <Square className="w-3 h-3" />}
+                  Stop fault
+                </button>
+              )}
+            </>
           )}
         </div>
       )}
 
+      {/* ── VERIFY ──────────────────────────────────────────────────── */}
       {column === 'verify' && (
         <div className="space-y-1.5">
-          {scenario.status === 'completed' && (
-            <div className="flex items-center gap-1.5 text-accent">
-              <CheckCircle2 className="w-3 h-3" />
-              Fault expired — services recovering
-            </div>
-          )}
-          {scenario.status === 'stopped' && (
-            <div className="flex items-center gap-1.5 text-slate-400">
-              <CheckCircle2 className="w-3 h-3" />
-              Stopped by operator
-            </div>
-          )}
-          {scenario.status === 'failed' && (
-            <div className="flex items-center gap-1.5 text-danger">
-              <AlertTriangle className="w-3 h-3" />
-              Scenario failed — review logs
-            </div>
+          {agentRun?.verify_result ? (
+            <>
+              <div className="flex items-center gap-1.5 text-cyan">
+                <Shield className="w-3 h-3" />
+                Verification complete
+              </div>
+              <p className="text-slate-500 text-[10px] leading-relaxed border-l-2 border-cyan/30 pl-2">
+                {agentRun.verify_result}
+              </p>
+            </>
+          ) : (
+            <>
+              {scenario.status === 'completed' && (
+                <div className="flex items-center gap-1.5 text-accent">
+                  <CheckCircle2 className="w-3 h-3" />
+                  Fault expired — services recovering
+                </div>
+              )}
+              {scenario.status === 'stopped' && (
+                <div className="flex items-center gap-1.5 text-slate-400">
+                  <CheckCircle2 className="w-3 h-3" />
+                  Stopped — verifying
+                </div>
+              )}
+              {scenario.status === 'failed' && (
+                <div className="flex items-center gap-1.5 text-danger">
+                  <AlertTriangle className="w-3 h-3" />
+                  Scenario failed — review logs
+                </div>
+              )}
+              {agentRun?.node === 'aborted' && (
+                <div className="flex items-center gap-1.5 text-warning">
+                  <AlertTriangle className="w-3 h-3" />
+                  Aborted — approval rejected or timed out
+                </div>
+              )}
+            </>
           )}
           {m !== null && (
             <div className="flex items-center gap-1.5 text-slate-600">
@@ -297,19 +438,22 @@ function LaneCard({ scenario, column }: { scenario: Scenario; column: Lane }) {
           )}
           {affected.length > 0 && (
             <p className="text-slate-600 text-[10px]">
-              Verify recovery of: {affected.slice(0, 2).map(n=>n.name).join(', ')}
+              Recover: {affected.slice(0, 2).map(n=>n.name).join(', ')}
               {affected.length > 2 ? ` +${affected.length - 2} more` : ''}
             </p>
           )}
         </div>
       )}
 
-      {/* elapsed/status footer */}
+      {/* footer */}
       <div className="text-[10px] text-slate-700 border-t border-border/30 pt-1.5">
         {scenario.started_at && (
           scenario.status === 'running'
             ? `${fmtSec(age)} elapsed`
             : `ended ${new Date(scenario.stopped_at ?? '').toLocaleTimeString()}`
+        )}
+        {agentRun && (
+          <span className="ml-2 text-accent/60">agent: {agentRun.node}</span>
         )}
       </div>
     </div>
@@ -318,12 +462,21 @@ function LaneCard({ scenario, column }: { scenario: Scenario; column: Lane }) {
 
 // ── swim lane column ──────────────────────────────────────────────────────────
 
-function LaneColumn({ lane, scenarios }: { lane: Lane; scenarios: Scenario[] }) {
+function LaneColumn({
+  lane,
+  scenarios,
+  agentRunMap,
+  onMutate,
+}: {
+  lane:         Lane
+  scenarios:    Scenario[]
+  agentRunMap:  Map<string, AgentRun>
+  onMutate:     () => void
+}) {
   const meta = LANE_META[lane]
 
   return (
     <div className="flex flex-col min-w-0">
-      {/* column header */}
       <div className={`flex items-center gap-2 px-3 py-2.5 rounded-t-lg border-t border-l border-r bg-elevated/40 ${meta.border}`}>
         <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${meta.dot}`} />
         <div className="min-w-0">
@@ -331,11 +484,15 @@ function LaneColumn({ lane, scenarios }: { lane: Lane; scenarios: Scenario[] }) 
           <p className="text-[10px] font-mono text-slate-700 truncate">{meta.sublabel}</p>
         </div>
       </div>
-
-      {/* cards */}
       <div className={`flex-1 border-l border-r border-b rounded-b-lg p-2 space-y-2 min-h-[120px] ${meta.border} bg-surface/30`}>
         {scenarios.map(s => (
-          <LaneCard key={s.id} scenario={s} column={lane} />
+          <LaneCard
+            key={s.id}
+            scenario={s}
+            column={lane}
+            agentRun={agentRunMap.get(s.id) ?? null}
+            onMutate={onMutate}
+          />
         ))}
       </div>
     </div>
@@ -367,9 +524,7 @@ function FailureModeRankings({ rankings, total }: { rankings: ComponentRanking[]
     <div className="space-y-3">
       <div className="flex items-center justify-between">
         <div>
-          <p className="text-[10px] font-mono text-slate-600 uppercase tracking-widest">
-            Fleet Weakness Map
-          </p>
+          <p className="text-[10px] font-mono text-slate-600 uppercase tracking-widest">Fleet Weakness Map</p>
           <p className="text-[10px] font-mono text-slate-700 mt-0.5">
             Ranked by fault exposure · {total} scenario{total !== 1 ? 's' : ''} analyzed
           </p>
@@ -425,7 +580,6 @@ function FailureModeRankings({ rankings, total }: { rankings: ComponentRanking[]
                   </td>
                   <td className="py-3 px-3">
                     <div className="flex items-center gap-1">
-                      {/* stacked bar */}
                       <div className="flex-1 h-3 rounded overflow-hidden bg-elevated flex">
                         {segments.map(s => (
                           <div
@@ -457,7 +611,7 @@ function FailureModeRankings({ rankings, total }: { rankings: ComponentRanking[]
             {sorted.length === 0 && (
               <tr>
                 <td colSpan={5} className="py-8 text-center text-[11px] font-mono text-slate-600">
-                  No scenarios in the rankings yet. Inject faults from the Incidents page to build the fleet weakness map.
+                  No scenarios yet. Inject faults from the Incidents page to build the fleet weakness map.
                 </td>
               </tr>
             )}
@@ -473,17 +627,34 @@ function FailureModeRankings({ rankings, total }: { rankings: ComponentRanking[]
 const LANES: Lane[] = ['detect', 'diagnose', 'heal', 'approve', 'verify']
 
 export default function Agent() {
-  const { data: scenarios = [], isLoading, isValidating, mutate } = useSWR(
+  const { data: scenarios = [], isLoading, isValidating, mutate: mutateScenarios } = useSWR(
     'scenarios', fetchScenarios, { refreshInterval: 5_000 },
+  )
+  const { data: agentRuns = [], error: agentError, mutate: mutateRuns } = useSWR(
+    'agent-runs', fetchRuns,
+    { refreshInterval: 5_000, onErrorRetry: (_, __, ___, revalidate, { retryCount }) => {
+      if (retryCount >= 2) return
+      setTimeout(() => revalidate({ retryCount }), 5000)
+    }},
   )
   const { data: rankingsData, error: rankingsError } = useSWR(
     'rankings', fetchRankings, { revalidateOnFocus: false },
   )
 
-  const running   = scenarios.filter(s => s.status === 'running').length
-  const resolved  = scenarios.filter(s => ['completed', 'stopped'].includes(s.status)).length
-  const allMttrs  = scenarios.map(mttr).filter((m): m is number => m !== null)
-  const avgMttr   = allMttrs.length > 0 ? Math.round(allMttrs.reduce((a, b) => a + b, 0) / allMttrs.length) : null
+  const agentRunMap = new Map<string, AgentRun>(agentRuns.map(r => [r.scenario_id, r]))
+  const agentOnline = !agentError
+
+  function onMutate() { mutateRuns(); mutateScenarios() }
+
+  const running  = scenarios.filter(s => s.status === 'running').length
+  const resolved = scenarios.filter(s => ['completed', 'stopped'].includes(s.status)).length
+  const allMttrs = [
+    ...agentRuns.filter(r => r.mttr_seconds !== null).map(r => r.mttr_seconds as number),
+    ...scenarios.filter(s => !agentRunMap.has(s.id)).map(mttr).filter((m): m is number => m !== null),
+  ]
+  const avgMttr  = allMttrs.length > 0
+    ? Math.round(allMttrs.reduce((a, b) => a + b, 0) / allMttrs.length)
+    : null
 
   return (
     <div className="space-y-5">
@@ -492,11 +663,11 @@ export default function Agent() {
         <div>
           <h1 className="text-base font-semibold text-slate-100">Phoenix Agent</h1>
           <p className="text-[11px] text-slate-600 mt-0.5 font-mono">
-            Healing pipeline · live scenario tracking · M2 agent activates this pipeline fully
+            LangGraph healing pipeline · detect → diagnose → heal → approve → verify
           </p>
         </div>
         <button
-          onClick={() => mutate()}
+          onClick={() => { mutateRuns(); mutateScenarios() }}
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-elevated border border-border text-slate-400 hover:text-slate-200 text-xs font-mono transition-colors"
         >
           <RefreshCw className={`w-3.5 h-3.5 ${isValidating ? 'animate-spin text-accent' : ''}`} />
@@ -504,27 +675,40 @@ export default function Agent() {
         </button>
       </div>
 
-      {/* M2 status banner */}
-      <div className="flex items-start gap-3 px-4 py-3 rounded-xl border border-violet/25 bg-violet/5">
-        <Zap className="w-4 h-4 text-violet shrink-0 mt-0.5" />
-        <div>
-          <p className="text-xs font-mono font-semibold text-violet">M2 Agent — not yet deployed</p>
-          <p className="text-[11px] font-mono text-slate-500 mt-0.5">
-            The swim lanes below show live data from the chaos API (scenarios, blast radius, timing).
-            When M2 lands: the <span className="text-violet">Diagnose</span> lane fills with Claude's causal chain,
-            <span className="text-accent"> Heal</span> shows active remediation actions,
-            and <span className="text-danger"> Approve</span> surfaces the human-approval gate with predicted outcomes.
-          </p>
+      {/* agent status banner */}
+      {agentOnline ? (
+        <div className="flex items-start gap-3 px-4 py-3 rounded-xl border border-accent/25 bg-accent/5">
+          <Zap className="w-4 h-4 text-accent shrink-0 mt-0.5" />
+          <div>
+            <p className="text-xs font-mono font-semibold text-accent">Phoenix Agent — live</p>
+            <p className="text-[11px] font-mono text-slate-500 mt-0.5">
+              Agent picks up every running scenario within {10}s. Cards in
+              {' '}<span className="text-violet">Diagnose</span> show Claude's real causal chain,
+              {' '}<span className="text-accent">Heal</span> shows the remediation action in flight,
+              and {' '}<span className="text-danger">Approve</span> surfaces the human-approval gate for high-risk actions.
+            </p>
+          </div>
         </div>
-      </div>
+      ) : (
+        <div className="flex items-start gap-3 px-4 py-3 rounded-xl border border-slate-700/40 bg-elevated/30">
+          <AlertTriangle className="w-4 h-4 text-slate-600 shrink-0 mt-0.5" />
+          <div>
+            <p className="text-xs font-mono font-semibold text-slate-500">Phoenix Agent — offline</p>
+            <p className="text-[11px] font-mono text-slate-600 mt-0.5">
+              Agent API unreachable. Start port-forward:{' '}
+              <span className="text-slate-400 font-mono">kubectl port-forward -n phoenix-system svc/phoenix-agent 8084:80</span>
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* stats bar */}
       <div className="grid grid-cols-4 gap-3">
         {[
-          { label: 'Total scenarios', value: scenarios.length, color: 'text-slate-200' },
-          { label: 'Active faults', value: running, color: running > 0 ? 'text-danger' : 'text-slate-400' },
-          { label: 'Resolved', value: resolved, color: 'text-accent' },
-          { label: 'Avg MTTR', value: avgMttr !== null ? fmtSec(avgMttr) : '—', color: 'text-slate-300' },
+          { label: 'Total scenarios', value: scenarios.length,    color: 'text-slate-200' },
+          { label: 'Active faults',   value: running,             color: running > 0 ? 'text-danger' : 'text-slate-400' },
+          { label: 'Resolved',        value: resolved,            color: 'text-accent' },
+          { label: 'Avg MTTR',        value: avgMttr !== null ? fmtSec(avgMttr) : '—', color: 'text-slate-300' },
         ].map(stat => (
           <div key={stat.label} className="bg-card border border-border rounded-lg px-4 py-3">
             <p className="text-[10px] font-mono text-slate-600 uppercase tracking-widest">{stat.label}</p>
@@ -533,7 +717,7 @@ export default function Agent() {
         ))}
       </div>
 
-      {/* pipeline label */}
+      {/* pipeline breadcrumb */}
       <div className="flex items-center gap-2 text-[10px] font-mono text-slate-700">
         {LANES.map((lane, i) => (
           <span key={lane} className="flex items-center gap-2">
@@ -554,7 +738,13 @@ export default function Agent() {
       ) : (
         <div className="grid grid-cols-5 gap-3">
           {LANES.map(lane => (
-            <LaneColumn key={lane} lane={lane} scenarios={scenarios} />
+            <LaneColumn
+              key={lane}
+              lane={lane}
+              scenarios={scenarios}
+              agentRunMap={agentRunMap}
+              onMutate={onMutate}
+            />
           ))}
         </div>
       )}
@@ -562,7 +752,7 @@ export default function Agent() {
       {!isLoading && scenarios.length === 0 && (
         <p className="text-center text-[11px] font-mono text-slate-700 py-4">
           No scenarios yet — inject a fault from the{' '}
-          <span className="text-accent">Incidents</span> page to watch cards move through the pipeline.
+          <span className="text-accent">Incidents</span> page to watch the pipeline.
         </p>
       )}
 

@@ -10,7 +10,7 @@
 #   ./deploy.sh --restart              skip build+load, just restart running pods
 #   ./deploy.sh --restart dashboard    restart one service only
 #
-# Services: sim | chaos | faultlib | graph | dashboard
+# Services: sim | chaos | faultlib | graph | dashboard | agent
 
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -22,7 +22,7 @@ NODES=(192.168.139.42 192.168.139.77 192.168.139.45)
 SSH_KEY="$HOME/.orbstack/ssh/id_ed25519"
 SSH_OPTS="-i $SSH_KEY -o StrictHostKeyChecking=no -o ConnectTimeout=10"
 
-ALL_SERVICES=(sim chaos faultlib graph dashboard)
+ALL_SERVICES=(sim chaos faultlib graph dashboard agent)
 
 # service → image name
 declare -A IMAGE=(
@@ -31,6 +31,7 @@ declare -A IMAGE=(
   [faultlib]=phoenix-faultlib
   [graph]=phoenix-graph
   [dashboard]=phoenix-dashboard
+  [agent]=phoenix-agent
 )
 
 # service → k8s deployment name
@@ -40,10 +41,11 @@ declare -A DEPLOY_NAME=(
   [faultlib]=phoenix-faultlib
   [graph]=phoenix-graph
   [dashboard]=phoenix-dashboard
+  [agent]=phoenix-agent
 )
 
 # services that have k8s/rbac.yaml
-RBAC_SERVICES=(chaos graph)
+RBAC_SERVICES=(chaos graph agent)
 
 # port-forward hints (local:remote) shown at the end
 declare -A PORTS=(
@@ -52,6 +54,7 @@ declare -A PORTS=(
   [faultlib]="8081:80"
   [graph]="8080:80"
   [dashboard]="3000:80"
+  [agent]="8084:80"
 )
 
 # ── colors ────────────────────────────────────────────────────────────────────
@@ -76,7 +79,7 @@ SELECTED=()
 for arg in "$@"; do
   case "$arg" in
     --restart) RESTART_ONLY=true ;;
-    sim|chaos|faultlib|graph|dashboard) SELECTED+=("$arg") ;;
+    sim|chaos|faultlib|graph|dashboard|agent) SELECTED+=("$arg") ;;
     *) die "Unknown argument: $arg. Valid services: ${ALL_SERVICES[*]}" ;;
   esac
 done
@@ -106,6 +109,20 @@ preflight() {
   fi
 
   ok "Cluster reachable · namespace $NAMESPACE ready"
+
+  # Create agent secret if deploying agent and key is set
+  if [[ " ${SELECTED[*]} " == *" agent "* ]]; then
+    local api_key="${ANTHROPIC_API_KEY:-}"
+    if [ -z "$api_key" ]; then
+      warn "ANTHROPIC_API_KEY not set — agent will start but cannot call Claude. Set it and re-run."
+    else
+      kubectl create secret generic phoenix-agent-secrets \
+        --from-literal=anthropic-api-key="$api_key" \
+        --namespace="$NAMESPACE" \
+        --dry-run=client -o yaml | kubectl apply -f - &>/dev/null
+      ok "Agent secret applied"
+    fi
+  fi
 }
 
 # ── node image load (parallel across nodes) ───────────────────────────────────
