@@ -187,15 +187,54 @@ kubectl logs -n phoenix-system -l app=phoenix-faultlib -f
 
 ---
 
+## 4. Blast-Radius Graph Builder (`/graph`) — backend
+
+Derives the service dependency graph from the live cluster and predicts
+which downstream services are in the blast radius of a planned chaos
+scenario — before it runs.  Two data sources, both 100% real: k8s API
+(env-var DNS references between pods) and Hubble relay gRPC (actual
+FORWARDED TCP flows observed by Cilium's eBPF probes).
+
+### Run it locally
+```bash
+cd graph
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+cd src && uvicorn main:app --reload --port 8003
+```
+(Hubble relay access requires a working kubeconfig — `kubectl config use-context argus`.)
+
+### Try it out
+```bash
+curl http://localhost:8003/health
+curl http://localhost:8003/topology | jq '{nodes: [.nodes[] | .id], edges: [.edges[] | {src: .source, tgt: .target, type: .edge_type}]}'
+
+# Blast radius: what's at risk if chaos hits phoenix-chaos?
+curl "http://localhost:8003/blast-radius?target_namespace=phoenix-system&fault_type=network_latency&selector=app=phoenix-chaos" | jq .
+```
+
+### Deploy it to the cluster
+```bash
+cd graph
+./deploy.sh
+```
+RBAC needed — the service reads Services, Pods, ReplicaSets, Endpoints, and
+Namespaces across all namespaces, and talks to `hubble-relay.kube-system.svc`
+via gRPC.  Hubble protos (Cilium v1.15.0) are compiled at Docker build time.
+```bash
+kubectl port-forward -n phoenix-system svc/phoenix-graph 8080:80
+kubectl logs -n phoenix-system -l app=phoenix-graph -f
+```
+
+---
+
 ## What's coming
 
-The rest of M1 — and the agentic and frontend pieces — aren't built yet, so
-there's nothing to run for them yet. This guide will grow a section for each
-as it lands:
+The agentic and frontend pieces aren't built yet — this guide will grow a
+section for each as it lands:
 
 | Piece | What it'll be | Status |
 |---|---|---|
-| Blast-radius graph builder | Dependency graph from live cluster topology — what `Scenario.blast_radius` is waiting on | Pending |
 | `/agent` — LangGraph agent (backend) | detect → diagnose → heal → approve → verify, via Claude + MCP tools | Not started (M2) |
 | Dashboard (frontend) | React + Vite + Tailwind console — the "trigger" buttons that call `/chaos`'s `POST /scenarios` directly, plus the blast-radius graph and healing pipeline | Not started (M3) |
 
