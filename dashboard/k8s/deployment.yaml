@@ -1,0 +1,35 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: phoenix-dashboard
+  namespace: phoenix-system
+  labels:
+    app: phoenix-dashboard
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: phoenix-dashboard
+  template:
+    metadata:
+      labels:
+        app: phoenix-dashboard
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: dashboard
+          image: docker.io/library/phoenix-dashboard:latest
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 8080
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 101
+            allowPrivilegeEscalation: false
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+            limits:
+              cpu: "200m"
+              memory: "128Mi"
