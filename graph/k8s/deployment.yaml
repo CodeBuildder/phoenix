@@ -1,0 +1,51 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: phoenix-graph
+  namespace: phoenix-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: phoenix-graph
+  template:
+    metadata:
+      labels:
+        app: phoenix-graph
+    spec:
+      serviceAccountName: phoenix-graph
+      containers:
+        - name: phoenix-graph
+          image: docker.io/library/phoenix-graph:latest
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 8003
+          env:
+            - name: HUBBLE_ADDRESS
+              value: "hubble-relay.kube-system.svc.cluster.local:80"
+            - name: HUBBLE_MAX_FLOWS
+              value: "500"
+            - name: HUBBLE_TIMEOUT_SECONDS
+              value: "15.0"
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+            limits:
+              cpu: "200m"
+              memory: "256Mi"
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8003
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8003
+            initialDelaySeconds: 15
+            periodSeconds: 30
