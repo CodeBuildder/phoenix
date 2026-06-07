@@ -1,0 +1,77 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: phoenix-agent
+  namespace: phoenix-system
+  labels:
+    app: phoenix-agent
+    app.kubernetes.io/managed-by: phoenix
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: phoenix-agent
+  template:
+    metadata:
+      labels:
+        app: phoenix-agent
+    spec:
+      serviceAccountName: phoenix-agent
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      volumes:
+        - name: memory-data
+          emptyDir: {}
+      containers:
+        - name: phoenix-agent
+          image: docker.io/library/phoenix-agent:latest
+          imagePullPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            allowPrivilegeEscalation: false
+          ports:
+            - containerPort: 8080
+              name: http
+          volumeMounts:
+            - name: memory-data
+              mountPath: /data
+          env:
+            - name: ANTHROPIC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: phoenix-agent-secrets
+                  key: anthropic-api-key
+            - name: CHAOS_URL
+              value: "http://phoenix-chaos.phoenix-system.svc.cluster.local"
+            - name: GRAPH_URL
+              value: "http://phoenix-graph.phoenix-system.svc.cluster.local"
+            - name: FAULTLIB_URL
+              value: "http://phoenix-faultlib.phoenix-system.svc.cluster.local"
+            - name: NAMESPACE
+              value: "phoenix-system"
+            - name: DB_PATH
+              value: "/data/memory.db"
+            - name: POLL_INTERVAL_SECONDS
+              value: "10"
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 15
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 10

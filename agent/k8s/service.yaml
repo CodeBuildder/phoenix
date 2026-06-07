@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: phoenix-agent
+  namespace: phoenix-system
+  labels:
+    app: phoenix-agent
+spec:
+  selector:
+    app: phoenix-agent
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080
+  type: ClusterIP
