@@ -209,19 +209,52 @@ deploy_service() {
   ok "  $svc is live"
 }
 
-# ── summary ───────────────────────────────────────────────────────────────────
+# ── port-forwards ────────────────────────────────────────────────────────────
 
-print_summary() {
+PF_PIDS=()
+
+cleanup() {
   echo ""
-  echo -e "${GREEN}${BOLD}All done.${NC}"
+  log "Shutting down port-forwards..."
+  for pid in "${PF_PIDS[@]}"; do
+    kill "$pid" 2>/dev/null || true
+  done
+  echo -e "${GREEN}  ✓${NC} Done."
+}
+
+start_port_forwards() {
   echo ""
-  echo -e "${BOLD}Port-forwards (open one terminal per line):${NC}"
+  log "Starting port-forwards..."
+
+  # Kill any existing port-forwards for these services to avoid conflicts
+  for svc in "${SELECTED[@]}"; do
+    local local_port="${PORTS[$svc]%%:*}"
+    lsof -ti :"$local_port" 2>/dev/null | xargs kill -9 2>/dev/null || true
+  done
+
+  sleep 0.5
+
   for svc in "${SELECTED[@]}"; do
     local port="${PORTS[$svc]}"
     local name="${DEPLOY_NAME[$svc]}"
-    printf "  %-12s kubectl port-forward -n %s svc/%s %s\n" \
-      "$svc" "$NAMESPACE" "$name" "$port"
+    local local_port="${port%%:*}"
+    kubectl port-forward -n "$NAMESPACE" "svc/$name" "$port" \
+      --address=127.0.0.1 &>/dev/null &
+    PF_PIDS+=($!)
+    ok "  $name → http://localhost:${local_port}"
   done
+
+  trap cleanup EXIT INT TERM
+
+  echo ""
+  echo -e "${GREEN}${BOLD}Phoenix is up.${NC}"
+  echo ""
+
+  # Print the dashboard URL prominently if deployed
+  if [[ " ${SELECTED[*]} " == *" dashboard "* ]]; then
+    echo -e "  ${BOLD}Dashboard:${NC}  http://localhost:3000"
+  fi
+
   echo ""
   echo -e "${BOLD}Logs:${NC}"
   for svc in "${SELECTED[@]}"; do
@@ -229,13 +262,11 @@ print_summary() {
     printf "  %-12s kubectl logs -n %s -l app=%s -f\n" "$svc" "$NAMESPACE" "$name"
   done
   echo ""
-  echo -e "${BOLD}Quick health checks (after port-forwarding):${NC}"
-  local -A HEALTH_PATH=([sim]="8083" [chaos]="8082" [faultlib]="8081" [graph]="8080" [dashboard]="3000")
-  local -A HEALTH_URL=([sim]="/health" [chaos]="/health" [faultlib]="/health" [graph]="/health" [dashboard]="/")
-  for svc in "${SELECTED[@]}"; do
-    printf "  %-12s curl -s http://localhost:%s%s\n" \
-      "$svc" "${HEALTH_PATH[$svc]}" "${HEALTH_URL[$svc]}"
-  done
+  echo -e "  ${YELLOW}Ctrl+C to stop port-forwards${NC}"
+  echo ""
+
+  # Wait for all port-forward processes — keep script alive
+  wait "${PF_PIDS[@]}" 2>/dev/null || true
 }
 
 # ── main ──────────────────────────────────────────────────────────────────────
@@ -250,4 +281,4 @@ for svc in "${SELECTED[@]}"; do
   deploy_service "$svc"
 done
 
-print_summary
+start_port_forwards
