@@ -128,6 +128,7 @@ class ScenarioEngine:
 
         scenario = Scenario(
             name=req.name,
+            correlation_id=req.correlation_id,
             domain=req.domain,
             fault_type=fault_type.value,
             target=target.model_dump(),

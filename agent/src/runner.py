@@ -143,6 +143,11 @@ async def run_pipeline(
             "phoenix.agent.run.error",
             severity=Severity.HIGH,
             component=f"chaos.scenario.{run.scenario_id}",
-            payload={"scenario_id": run.scenario_id, "error": str(exc)},
+            payload={
+                "scenario_id": run.scenario_id,
+                "correlation_id": run.scenario.get("correlation_id") or run.scenario_id,
+                "domain": run.scenario.get("domain", "chaos_mesh"),
+                "error": str(exc),
+            },
         )
         log.error("runner.error", scenario_id=run.scenario_id, error=str(exc))

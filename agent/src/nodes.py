@@ -68,6 +68,8 @@ async def detect(run: AgentRun) -> AgentRun:
         component=f"chaos.scenario.{scenario.get('id', run.scenario_id)}",
         payload={
             "scenario_id":   run.scenario_id,
+            "correlation_id": scenario.get("correlation_id") or run.scenario_id,
+            "domain":        domain,
             "fault_type":    fault_type,
             "affected_nodes": len((run.blast_radius or {}).get("affected_nodes", [])),
         },
@@ -315,6 +317,8 @@ async def execute(run: AgentRun) -> AgentRun:
             component=f"chaos.scenario.{run.scenario_id}",
             payload={
                 "scenario_id": run.scenario_id,
+                "correlation_id": run.scenario.get("correlation_id") or run.scenario_id,
+                "domain":      run.scenario.get("domain", "chaos_mesh"),
                 "action":      action,
                 "target":      target,
                 "result":      result,
@@ -384,6 +388,8 @@ async def verify(run: AgentRun) -> AgentRun:
         component=f"chaos.scenario.{scenario_id}",
         payload={
             "scenario_id":   scenario_id,
+            "correlation_id": run.scenario.get("correlation_id") or scenario_id,
+            "domain":        run.scenario.get("domain", "chaos_mesh"),
             "verify_result": run.verify_result,
             "mttr_seconds":  run.mttr_seconds,
         },
@@ -421,6 +427,8 @@ async def report(run: AgentRun, memory_store) -> AgentRun:
         component=f"chaos.scenario.{run.scenario_id}",
         payload={
             "scenario_id":  run.scenario_id,
+            "correlation_id": run.scenario.get("correlation_id") or run.scenario_id,
+            "domain":       run.scenario.get("domain", "chaos_mesh"),
             "mttr_seconds": run.mttr_seconds,
             "outcome":      "success" if not run.error else "failed",
         },

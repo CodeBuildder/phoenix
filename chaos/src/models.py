@@ -113,6 +113,7 @@ class ScenarioCreateRequest(BaseModel):
     _build_simulator_fault, which reject anything that doesn't resolve to a
     real, well-formed backend request."""
     name: str
+    correlation_id: str | None = None
     domain: ScenarioDomain
     fault_type: str
     target: dict[str, Any] = Field(default_factory=dict)
@@ -129,6 +130,7 @@ class Scenario(BaseModel):
     """What every list/get/stop call returns, regardless of domain — the
     "launch/stop/monitor uniformly" shape the issue calls for."""
     id: str = Field(default_factory=_new_id)
+    correlation_id: str | None = None
     name: str
     domain: ScenarioDomain
     fault_type: str
