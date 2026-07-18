@@ -33,7 +33,7 @@ chore: bump langgraph and fastapi versions
 - `dashboard` — React + TS + Vite + Tailwind UI
 - `chaos` — Chaos Mesh wrapper, fault library, failure-mode taxonomy, blast radius
 - `provisioning-sim` — synthetic enterprise-infrastructure provisioning simulator
-- `ai` — Claude reasoning, diagnosis, predictive healing
+- `ai` — OpenAI reasoning, diagnosis, predictive healing
 - `ci` — CI/CD pipeline
 
 Milestones (`M1`–`M3` for Phoenix's own build, plus `M6`/`M7` for cross-platform

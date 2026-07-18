@@ -9,7 +9,7 @@ Commit history: https://github.com/CodeBuildder/phoenix/commits/main
 
 <p align="center">
   A chaos-engineering and self-healing agent for Kubernetes — induces real and synthetic
-  infrastructure failures, then detects, diagnoses, and remediates them with Claude and
+  infrastructure failures, then detects, diagnoses, and remediates them with OpenAI and
   a human-in-the-loop approval gate.
 </p>
 
@@ -34,7 +34,7 @@ cluster (and the agent) can recover from it.
   *infrastructure-operation* failures, not just pod failures
 - **Chaos injection engine** — wraps Chaos Mesh (pod kill, network latency, packet loss,
   IO delay) and the simulator's fault hooks behind one control surface
-- **LangGraph agent** — detect (Prometheus/Loki anomaly watch) → diagnose (Claude reads
+- **LangGraph agent** — detect (Prometheus/Loki anomaly watch) → diagnose (OpenAI reads
   logs/metrics and reconstructs the causal chain — "X failed *because* Y") → heal
   (executes remediation via MCP tools) → human-approval gate (risky actions pause for
   sign-off with full rationale + predicted outcome) → verify (confirm recovery, log MTTR)
@@ -70,8 +70,8 @@ the original journey passed after healing. The same seed replays the same test.
 | M1.3 — Fault Library & Taxonomy Classifier | Failure-mode classification from observed events ([`/faultlib`](faultlib/)) | Complete |
 | M1.4 — Blast-Radius Graph Builder | Dependency graph from live k8s + Hubble topology ([`/graph`](graph/)) | Complete |
 | Build Week Phase 4 — Customer Journey Resilience Lab | Seeded load/fault generation, safety gates, recovery evidence ([`/journeys`](journeys/)) | Complete (cluster-free adapter) |
-| M2 — Phoenix Agent | LangGraph detect → diagnose → heal → approve → verify | Not started |
-| M3 — Phoenix Dashboard | React console, blast-radius graph, healing pipeline | Not started |
+| M2 — Phoenix Agent | LangGraph detect → diagnose → heal → approve → verify state machine, predictive-healing memory store, event publisher | Complete |
+| M3 — Phoenix Dashboard | React console, blast-radius graph, healing pipeline swim lanes, incident feed, fleet weakness map | Complete |
 
 See the [milestones](https://github.com/CodeBuildder/phoenix/milestones) for the full
 build sequence and issue backlog.
@@ -84,7 +84,7 @@ cluster, plus what's coming next as the rest of M1 lands.
 
 ## Stack
 
-FastAPI + LangGraph agent, Claude API for reasoning, MCP tools for cluster actions
+FastAPI + LangGraph agent, OpenAI Responses API for reasoning, MCP tools for cluster actions
 (kubectl, PromQL, Loki, Chaos Mesh, provisioning sim), React + TypeScript + Vite +
 Tailwind dashboard. Reuses the existing Prometheus/Grafana/Loki + Cilium stack and k3s
 cluster from [argus-k8s](https://github.com/CodeBuildder/argus-k8s) — no duplicate

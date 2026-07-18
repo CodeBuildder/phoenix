@@ -235,7 +235,7 @@ section for each as it lands:
 
 | Piece | What it'll be | Status |
 |---|---|---|
-| `/agent` — LangGraph agent (backend) | detect → diagnose → heal → approve → verify, via Claude + MCP tools | Not started (M2) |
+| `/agent` — LangGraph agent (backend) | detect → diagnose → heal → approve → verify, via OpenAI + MCP tools | Not started (M2) |
 | Dashboard (frontend) | React + Vite + Tailwind console — the "trigger" buttons that call `/chaos`'s `POST /scenarios` directly, plus the blast-radius graph and healing pipeline | Not started (M3) |
 
 See the [module status table](README.md#status) for the up-to-date picture.
