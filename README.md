@@ -78,9 +78,45 @@ build sequence and issue backlog.
 
 ## Start here
 
-Choose one path. The local path proves Phoenix's safe simulator workflow without
-touching Kubernetes. The cluster path adds live topology, Hubble flows, Chaos Mesh,
-and the OpenAI-powered recovery agent.
+For the complete Build Week judge experience, use the one-command platform path from
+the sibling Argus checkout. It starts or reuses Argus, Phoenix, Sentinel, the SOG, and
+their canonical local consoles; publishes deterministic cross-agent evidence; and
+verifies the correlated Sentinel incident before reporting success.
+
+```text
+Projects/
+├── argus-k8s/                 # run the command here
+└── sentinel-stack/
+    ├── phoenix/
+    └── sentinel/
+```
+
+Install dependencies once, select the real k3s context, and preflight without changing
+the cluster or publishing findings:
+
+```bash
+make -C ../../argus-k8s setup-local
+make -C ../sentinel setup-local
+npm --prefix dashboard install
+kubectl config use-context argus
+make -C ../../argus-k8s demo-platform-dry-run
+```
+
+Launch the complete demo:
+
+```bash
+make -C ../../argus-k8s demo-platform
+```
+
+Open Argus at **http://127.0.0.1:5173**, Phoenix at
+**http://127.0.0.1:5174**, and Sentinel at **http://127.0.0.1:5175**. The command
+labels the proof as `replayed` Argus evidence and a Phoenix `simulator` outcome; it
+does not inject live Chaos Mesh faults. Existing healthy processes are reused, and
+`Ctrl-C` stops only processes started by the command.
+
+For Phoenix by itself, choose one of the paths below. The local path proves Phoenix's
+safe simulator workflow without touching Kubernetes. The cluster path adds live
+topology, Hubble flows, Chaos Mesh, and the OpenAI-powered recovery agent.
 
 | Path | Kubernetes | Dashboard | What you can inject |
 |---|---:|---|---|
