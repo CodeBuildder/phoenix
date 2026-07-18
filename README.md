@@ -83,6 +83,24 @@ The Phoenix top bar switches directly between all three platform consoles. Desti
 are never inferred from fixed ports: configure them explicitly for each environment.
 Missing destinations render as disabled instead of navigating to an assumed address:
 
+For the local three-console demo, the reserved ports are:
+
+| Console | URL |
+| --- | --- |
+| Argus | `http://127.0.0.1:5173` |
+| Phoenix | `http://127.0.0.1:5174` |
+| Sentinel | `http://127.0.0.1:5175` |
+
+Set the switcher destinations before starting Phoenix locally:
+
+```bash
+VITE_ARGUS_URL=http://127.0.0.1:5173 \
+VITE_SENTINEL_URL=http://127.0.0.1:5175 \
+npm --prefix dashboard run dev
+```
+
+For deployed environments, provide their public URLs during the dashboard build:
+
 ```bash
 VITE_ARGUS_URL=https://argus.example.com \
 VITE_SENTINEL_URL=https://sentinel.example.com \
