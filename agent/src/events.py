@@ -107,6 +107,9 @@ async def _post_to_wm(event: Event) -> None:
     sid     = p.get("scenario_id", "unknown")
     ns      = p.get("namespace") or config.NAMESPACE
     service = p.get("service") or p.get("action_target")
+    scenario = p.get("scenario") if isinstance(p.get("scenario"), dict) else {}
+    domain = p.get("domain") or scenario.get("domain") or "observed"
+    provenance = "live_chaos" if domain == "chaos_mesh" else "simulator" if domain == "simulator" else "observed"
 
     await post_finding(
         scenario_id=sid,
@@ -117,4 +120,6 @@ async def _post_to_wm(event: Event) -> None:
         severity=event.severity.value,
         outcome=p.get("outcome", "unknown"),
         payload=p,
+        correlation_id=p.get("correlation_id") or scenario.get("correlation_id") or sid,
+        provenance=provenance,
     )

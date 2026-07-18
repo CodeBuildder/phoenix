@@ -37,6 +37,8 @@ async def post_finding(
     severity: str,
     outcome: str,
     payload: dict,
+    correlation_id: str | None = None,
+    provenance: str = "observed",
 ) -> None:
     if not _WM_URL:
         return
@@ -49,12 +51,14 @@ async def post_finding(
         "source":    "phoenix",
         "timestamp": _now(),
         "severity":  severity,
+        "correlation_id": correlation_id or scenario_id,
         "payload": {
             "finding_type":  "healing_action",
             "scenario_id":   scenario_id,
             "pipeline_node": node,
             "fault_type":    fault_type,
             "outcome":       outcome,
+            "provenance":    provenance,
             **payload,
         },
     }

@@ -82,6 +82,12 @@ class TestCreateScenario:
         assert body["backend_ref"] in fake.rules
         assert fake.rules[body["backend_ref"]]["resource_type"] == "volume"
 
+    def test_scenario_preserves_explicit_correlation_id(self, monkeypatch):
+        _swap_backends(monkeypatch, simulator=FakeSimulatorClient())
+        response = client.post("/scenarios", json={**SIMULATOR_PAYLOAD, "correlation_id": "case-argus-phoenix-1"})
+        assert response.status_code == 201
+        assert response.json()["correlation_id"] == "case-argus-phoenix-1"
+
     def test_unknown_fault_type_returns_422_and_records_nothing(self, monkeypatch):
         _swap_backends(monkeypatch)
         response = client.post("/scenarios", json={**CHAOS_MESH_PAYLOAD, "fault_type": "black_hole"})
