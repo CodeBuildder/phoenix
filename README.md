@@ -85,6 +85,18 @@ cluster, plus what's coming next as the rest of M1 lands.
 ## Stack
 
 FastAPI + LangGraph agent, OpenAI Responses API for reasoning, MCP tools for cluster actions
+
+### Cross-console navigation
+
+The Phoenix top bar switches directly between all three platform consoles. Destinations
+are never inferred from fixed ports: configure them explicitly for each environment.
+Missing destinations render as disabled instead of navigating to an assumed address:
+
+```bash
+VITE_ARGUS_URL=https://argus.example.com \
+VITE_SENTINEL_URL=https://sentinel.example.com \
+npm --prefix dashboard run build
+```
 (kubectl, PromQL, Loki, Chaos Mesh, provisioning sim), React + TypeScript + Vite +
 Tailwind dashboard. Reuses the existing Prometheus/Grafana/Loki + Cilium stack and k3s
 cluster from [argus-k8s](https://github.com/CodeBuildder/argus-k8s) — no duplicate
