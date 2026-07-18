@@ -67,11 +67,81 @@ cluster (and the agent) can recover from it.
 See the [milestones](https://github.com/CodeBuildder/phoenix/milestones) for the full
 build sequence and issue backlog.
 
-## Local setup
+## Start here
 
-See **[setup.md](setup.md)** for the full quick-start guide — copy-paste
-commands to run the Provisioning Simulator locally or deploy it to the
-cluster, plus what's coming next as the rest of M1 lands.
+Choose one path. The local path proves Phoenix's safe simulator workflow without
+touching Kubernetes. The cluster path adds live topology, Hubble flows, Chaos Mesh,
+and the OpenAI-powered recovery agent.
+
+| Path | Kubernetes | Dashboard | What you can inject |
+|---|---:|---|---|
+| **Safe local demo** | No | `http://127.0.0.1:5174` | Synthetic provisioning faults only |
+| **Live k3s demo** | Yes | `http://127.0.0.1:3000` | Synthetic faults plus bounded Chaos Mesh experiments |
+
+### Path A — safe local demo, no Kubernetes
+
+Run the simulator, chaos API, taxonomy service, and dashboard in four terminals. The
+dashboard intentionally reports cluster topology and agent panels as unavailable;
+those are live-only signals, not mocked data.
+
+```bash
+# Terminal 1 — provisioning simulator
+python3 -m venv sim/.venv
+sim/.venv/bin/pip install -r sim/requirements.txt
+sim/.venv/bin/python -m uvicorn main:app --app-dir sim/src --host 127.0.0.1 --port 8083
+```
+
+```bash
+# Terminal 2 — safe simulator-domain injection API
+python3 -m venv chaos/.venv
+chaos/.venv/bin/pip install -r chaos/requirements.txt
+SIMULATOR_URL=http://127.0.0.1:8083 \
+  chaos/.venv/bin/python -m uvicorn main:app --app-dir chaos/src --host 127.0.0.1 --port 8082
+```
+
+```bash
+# Terminal 3 — fault catalog and scenario rankings
+python3 -m venv faultlib/.venv
+faultlib/.venv/bin/pip install -r faultlib/requirements.txt
+CHAOS_URL=http://127.0.0.1:8082 \
+  faultlib/.venv/bin/python -m uvicorn main:app --app-dir faultlib/src --host 127.0.0.1 --port 8081
+```
+
+```bash
+# Terminal 4 — Phoenix console
+npm --prefix dashboard install
+VITE_ARGUS_URL=http://127.0.0.1:5173 \
+VITE_SENTINEL_URL=http://127.0.0.1:5175 \
+  npm --prefix dashboard run dev
+```
+
+Open **http://127.0.0.1:5174**, choose **Safe Simulation**, and inject a simulator
+fault. This path never creates a Kubernetes or Chaos Mesh resource.
+
+### Path B — live k3s demo
+
+Phoenix reuses Argus's real three-node k3s cluster. Verify the context before deploying:
+
+```bash
+kubectl config use-context argus
+kubectl get nodes
+kubectl get pods -n chaos-mesh
+```
+
+Expect `k3s-master`, `k3s-worker1`, and `k3s-worker2` to be Ready. Then deploy all
+Phoenix services and keep the supervised port-forwards running:
+
+```bash
+./deploy.sh
+```
+
+Open **http://127.0.0.1:3000**. **Safe Simulation** remains non-disruptive. **Live
+k3s** shows the exact namespace, selector, fault, duration, and blast radius and
+requires the typed confirmation `INJECT LIVE FAULT` before creating a bounded Chaos
+Mesh resource.
+
+For prerequisites, existing-cluster checks, service-by-service development, and
+troubleshooting, follow **[setup.md](setup.md)**.
 
 ## Stack
 
