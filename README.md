@@ -79,9 +79,9 @@ FastAPI + LangGraph agent, OpenAI Responses API for reasoning, MCP tools for clu
 
 ### Cross-console navigation
 
-The Phoenix top bar switches directly between all three platform consoles. Local demo
-defaults are Argus at `http://127.0.0.1:5173`, Phoenix at the current origin, and
-Sentinel at `http://127.0.0.1:5174`. Override the external destinations at build time:
+The Phoenix top bar switches directly between all three platform consoles. Destinations
+are never inferred from fixed ports: configure them explicitly for each environment.
+Missing destinations render as disabled instead of navigating to an assumed address:
 
 ```bash
 VITE_ARGUS_URL=https://argus.example.com \

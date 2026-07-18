@@ -177,7 +177,14 @@ deploy_service() {
   fi
 
   log "  Building Docker image ${image}:latest..."
-  docker build -t "${image}:latest" "$dir" --quiet
+  if [ "$svc" = "dashboard" ]; then
+    docker build \
+      --build-arg "VITE_ARGUS_URL=${VITE_ARGUS_URL:-}" \
+      --build-arg "VITE_SENTINEL_URL=${VITE_SENTINEL_URL:-}" \
+      -t "${image}:latest" "$dir" --quiet
+  else
+    docker build -t "${image}:latest" "$dir" --quiet
+  fi
   ok "  Image built"
 
   load_to_nodes "$image"
