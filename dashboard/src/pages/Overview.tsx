@@ -176,11 +176,30 @@ function OperationalDetailsDrawer({
   const flowEdges = edges.filter(edge => edge.edge_type === 'flow_observed')
   const namespaces = Array.from(new Set(nodes.map(node => node.namespace))).sort()
   const nodeMap = new Map(nodes.map(node => [node.id, node]))
-  const tabs: Array<{ id: DetailTab; label: string; count: number; icon: React.ElementType }> = [
-    { id: 'services', label: 'Services', count: nodes.length, icon: Boxes },
-    { id: 'namespaces', label: 'Namespaces', count: namespaces.length, icon: Layers3 },
-    { id: 'flows', label: 'Live Flows', count: flowEdges.length, icon: Activity },
-    { id: 'scenarios', label: 'Scenarios', count: scenarios.length, icon: FlaskConical },
+  const tabs: Array<{
+    id: DetailTab; label: string; count: number; icon: React.ElementType
+    accent: string; active: string; idle: string
+  }> = [
+    {
+      id: 'services', label: 'Services', count: nodes.length, icon: Boxes,
+      accent: 'text-emerald-400', active: 'border-emerald-400/50 bg-emerald-400/10 shadow-[inset_0_-2px_0_rgba(52,211,153,0.65)]',
+      idle: 'border-border bg-card hover:border-emerald-400/30 hover:bg-emerald-400/5',
+    },
+    {
+      id: 'namespaces', label: 'Namespaces', count: namespaces.length, icon: Layers3,
+      accent: 'text-cyan-400', active: 'border-cyan-400/50 bg-cyan-400/10 shadow-[inset_0_-2px_0_rgba(34,211,238,0.65)]',
+      idle: 'border-border bg-card hover:border-cyan-400/30 hover:bg-cyan-400/5',
+    },
+    {
+      id: 'flows', label: 'Live Flows', count: flowEdges.length, icon: Activity,
+      accent: 'text-amber-400', active: 'border-amber-400/50 bg-amber-400/10 shadow-[inset_0_-2px_0_rgba(251,191,36,0.65)]',
+      idle: 'border-border bg-card hover:border-amber-400/30 hover:bg-amber-400/5',
+    },
+    {
+      id: 'scenarios', label: 'Scenarios', count: scenarios.length, icon: FlaskConical,
+      accent: 'text-violet-400', active: 'border-violet-400/50 bg-violet-400/10 shadow-[inset_0_-2px_0_rgba(167,139,250,0.65)]',
+      idle: 'border-border bg-card hover:border-violet-400/30 hover:bg-violet-400/5',
+    },
   ]
 
   useEffect(() => {
@@ -216,17 +235,21 @@ function OperationalDetailsDrawer({
           </div>
         </header>
 
-        <nav className="grid grid-cols-2 sm:grid-cols-4 gap-2 p-4 border-b border-border" aria-label="Operational detail categories">
-          {tabs.map(({ id, label, count, icon: Icon }) => (
+        <nav
+          className="grid gap-2 p-4 border-b border-border [grid-template-columns:repeat(auto-fit,minmax(120px,1fr))]"
+          aria-label="Operational detail categories"
+          role="tablist"
+        >
+          {tabs.map(({ id, label, count, icon: Icon, accent, active, idle }) => (
             <button
               key={id}
               onClick={() => setActiveTab(id)}
-              className={`rounded-lg border px-3 py-2.5 text-left transition-colors ${activeTab === id ? 'border-accent/40 bg-accent/10' : 'border-border bg-card hover:border-slate-600'}`}
+              className={`min-w-0 rounded-lg border px-3 py-2.5 text-left transition-all ${activeTab === id ? active : idle}`}
               aria-selected={activeTab === id}
               role="tab"
             >
-              <span className="flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-wider text-slate-500"><Icon className="w-3 h-3" />{label}</span>
-              <span className={`block mt-1 text-xl font-mono font-semibold ${activeTab === id ? 'text-accent' : 'text-slate-200'}`}>{count}</span>
+              <span className={`flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-wider ${accent}`}><Icon className="w-3 h-3 shrink-0" /><span className="truncate">{label}</span></span>
+              <span className={`block mt-1 text-xl font-mono font-semibold tabular-nums ${accent}`}>{count}</span>
             </button>
           ))}
         </nav>
