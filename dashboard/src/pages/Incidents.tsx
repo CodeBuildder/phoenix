@@ -3,7 +3,7 @@ import useSWR, { useSWRConfig } from 'swr'
 import { fetchScenarios, stopScenario } from '../api/chaos'
 import { fetchTopology, fetchBlastRadius } from '../api/graph'
 import { fetchCatalog } from '../api/faultlib'
-import { injectRandomChaos, type ImpactLevel } from '../api/incidents'
+import { executeInjection, prepareInjection, type InjectionMode, type InjectionPreview } from '../api/incidents'
 import type { Scenario } from '../types/chaos'
 import type { AffectedNode } from '../types/graph'
 import type { FaultCatalogEntry } from '../types/faultlib'
@@ -878,142 +878,44 @@ function IncidentCard({ scenario, catalog, onStop }: {
 
 // ── inject impact modal ────────────────────────────────────────────────────────
 
-const IMPACT_OPTIONS: {
-  level: ImpactLevel
-  label: string
-  sublabel: string
-  description: string
-  faultTypes: string
-  duration: string
-  color: string
-  border: string
-  dotColor: string
-}[] = [
-  {
-    level: 'low',
-    label: 'Low',
-    sublabel: 'Contained',
-    description: 'Transient and quota-limit faults. Isolated blast radius, quick recovery. Safe for production-adjacent environments.',
-    faultTypes: 'transient · quota-limit',
-    duration: '60 – 120s',
-    color: 'text-accent',
-    border: 'border-accent/30 bg-accent/5',
-    dotColor: 'bg-accent',
-  },
-  {
-    level: 'medium',
-    label: 'Medium',
-    sublabel: 'Performance hit',
-    description: 'Resource-exhaustion faults. Degrades throughput and latency. May cause timeouts in dependent services.',
-    faultTypes: 'resource-exhaustion',
-    duration: '30 – 90s',
-    color: 'text-warning',
-    border: 'border-warning/30 bg-warning/5',
-    dotColor: 'bg-warning',
-  },
-  {
-    level: 'high',
-    label: 'High',
-    sublabel: 'Cascading risk',
-    description: 'Cascading and network-partition faults. Can propagate across multiple services. Shorter window, human intervention may be needed.',
-    faultTypes: 'cascading · network-partition',
-    duration: '20 – 45s',
-    color: 'text-danger',
-    border: 'border-danger/30 bg-danger/5',
-    dotColor: 'bg-danger',
-  },
-  {
-    level: 'random',
-    label: 'Random',
-    sublabel: 'Full catalog',
-    description: 'Phoenix picks any fault from the live catalog. Impact level unknown until blast radius is computed.',
-    faultTypes: 'any fault type',
-    duration: '30 – 120s',
-    color: 'text-violet',
-    border: 'border-violet/30 bg-violet/5',
-    dotColor: 'bg-violet',
-  },
-]
-
-function InjectModal({ onConfirm, onClose }: {
-  onConfirm: (level: ImpactLevel) => void
-  onClose:   () => void
+function InjectionConfirmModal({ preview, onConfirm, onClose, executing }: {
+  preview: InjectionPreview
+  onConfirm: () => void
+  onClose: () => void
+  executing: boolean
 }) {
-  const [selected, setSelected] = useState<ImpactLevel>('low')
-
+  const [confirmation, setConfirmation] = useState('')
+  const live = preview.mode === 'live'
+  const allowed = !live || confirmation === 'INJECT LIVE FAULT'
+  const selector = Object.entries(preview.selector).map(([key, value]) => `${key}=${value}`).join(', ')
   return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-      <div className="bg-surface border border-border rounded-xl w-full max-w-lg shadow-2xl">
+    <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+      <div className={`bg-surface border rounded-xl w-full max-w-xl shadow-2xl ${live ? 'border-danger/50' : 'border-accent/40'}`}>
         <div className="flex items-center justify-between px-5 py-4 border-b border-border">
-          <div className="flex items-center gap-2">
-            <Zap className="w-4 h-4 text-danger" />
-            <p className="font-semibold text-slate-200 text-sm">Inject Random Fault</p>
+          <div className="flex items-center gap-3">
+            <div className={`w-9 h-9 rounded-lg grid place-items-center ${live ? 'bg-danger/15 text-danger' : 'bg-accent/15 text-accent'}`}>{live ? <AlertTriangle className="w-5 h-5" /> : <Shield className="w-5 h-5" />}</div>
+            <div><p className={`font-mono text-[10px] font-bold tracking-widest ${live ? 'text-danger' : 'text-accent'}`}>{live ? 'LIVE K3S CHANGE' : 'SAFE SIMULATION'}</p><p className="font-semibold text-slate-200 text-sm">Review before execution</p></div>
           </div>
-          <button onClick={onClose} className="text-slate-500 hover:text-slate-300"><X className="w-4 h-4" /></button>
+          <button onClick={onClose} disabled={executing} className="text-slate-500 hover:text-slate-300"><X className="w-4 h-4" /></button>
         </div>
-
         <div className="p-5 space-y-4">
-          <p className="text-xs text-slate-500 font-mono">
-            Choose the impact level. Phoenix will pick a matching fault from the live catalog
-            and target a real service in your cluster.
-          </p>
-
-          <div className="space-y-2">
-            {IMPACT_OPTIONS.map(opt => (
-              <button
-                key={opt.level}
-                onClick={() => setSelected(opt.level)}
-                className={`w-full text-left rounded-lg border p-3 transition-all duration-150 ${
-                  selected === opt.level ? opt.border : 'border-border bg-elevated/30 hover:bg-elevated/60'
-                }`}
-              >
-                <div className="flex items-start gap-3">
-                  <div className="mt-1 shrink-0">
-                    <span className={`relative flex h-3 w-3 rounded-full ${selected === opt.level ? opt.dotColor : 'bg-slate-700'} transition-colors`} />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-baseline gap-2">
-                      <span className={`text-sm font-mono font-bold ${selected === opt.level ? opt.color : 'text-slate-300'}`}>
-                        {opt.label}
-                      </span>
-                      <span className="text-[10px] font-mono text-slate-600">{opt.sublabel}</span>
-                    </div>
-                    <p className="text-[11px] font-mono text-slate-500 mt-0.5 leading-relaxed">{opt.description}</p>
-                    <div className="flex gap-4 mt-1.5 text-[10px] font-mono text-slate-700">
-                      <span>faults: {opt.faultTypes}</span>
-                      <span>duration: {opt.duration}</span>
-                    </div>
-                  </div>
-                </div>
-              </button>
-            ))}
+          <div className={`rounded-lg border px-4 py-3 text-xs leading-relaxed ${live ? 'border-danger/30 bg-danger/5 text-red-200' : 'border-accent/25 bg-accent/5 text-slate-300'}`}>{live ? 'This creates a genuine Chaos Mesh resource and temporarily affects a running workload. Phoenix will monitor, remediate, verify, and automatically clean it up.' : 'This registers a synthetic fault rule. It exercises detection and recovery logic without creating a Chaos Mesh resource or disrupting a Kubernetes workload.'}</div>
+          <div className="grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-border bg-border font-mono text-[11px]">
+            {[
+              ['Execution', live ? 'Chaos Mesh · observed' : 'Simulator · synthetic'],
+              ['Fault', preview.faultType], ['Target', preview.targetName], ['Namespace', preview.namespace],
+              ['Selector', selector || 'none'], ['Duration', `${preview.durationSeconds}s · automatic cleanup`],
+              ['Blast radius', `${preview.affectedServices} downstream service${preview.affectedServices === 1 ? '' : 's'}`], ['Taxonomy', preview.taxonomy],
+            ].map(([label, value]) => <div key={label} className="bg-card p-3"><span className="block text-slate-600 mb-1">{label}</span><b className="text-slate-300 break-all">{value}</b></div>)}
           </div>
-
-          <div className="flex gap-3 pt-1">
-            <button onClick={onClose} className="flex-1 btn-secondary text-xs">Cancel</button>
-            <button
-              onClick={() => onConfirm(selected)}
-              className={`flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-lg border text-sm font-mono font-semibold transition-colors ${
-                selected === 'high'
-                  ? 'bg-danger/15 border-danger/40 text-danger hover:bg-danger/25'
-                  : selected === 'medium'
-                  ? 'bg-warning/10 border-warning/30 text-warning hover:bg-warning/20'
-                  : selected === 'random'
-                  ? 'bg-violet/10 border-violet/30 text-violet hover:bg-violet/20'
-                  : 'bg-accent/15 border-accent/30 text-accent hover:bg-accent/25'
-              }`}
-            >
-              <Zap className="w-4 h-4" />
-              Inject {selected === 'random' ? 'Random' : selected.charAt(0).toUpperCase() + selected.slice(1)} Fault
-            </button>
-          </div>
+          <p className="text-[11px] text-slate-500 leading-relaxed">{preview.description}</p>
+          {live && <div><label className="block text-[10px] text-danger font-mono mb-1.5">Type INJECT LIVE FAULT to authorize this bounded cluster change</label><input autoFocus value={confirmation} onChange={event => setConfirmation(event.target.value)} className="input w-full font-mono text-xs" placeholder="INJECT LIVE FAULT" /></div>}
+          <div className="flex gap-3 pt-1"><button onClick={onClose} disabled={executing} className="flex-1 btn-secondary text-xs">Cancel</button><button onClick={onConfirm} disabled={!allowed || executing} className={`flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-lg border text-xs font-mono font-bold disabled:opacity-35 ${live ? 'bg-danger/15 border-danger/40 text-danger' : 'bg-accent/15 border-accent/30 text-accent'}`}>{executing ? <Loader2 className="w-4 h-4 animate-spin" /> : live ? <Zap className="w-4 h-4" /> : <Shield className="w-4 h-4" />}{executing ? 'Starting…' : live ? 'Inject Live Fault' : 'Run Safe Simulation'}</button></div>
         </div>
       </div>
     </div>
   )
 }
-
-// ── notification modal ────────────────────────────────────────────────────────
 
 function NotifyModal({ onClose }: { onClose: () => void }) {
   const saved = loadChannels()
@@ -1058,7 +960,8 @@ export default function Incidents() {
   const [injecting, setInjecting]        = useState(false)
   const [injectErr, setInjectErr]        = useState<string | null>(null)
   const [showNotify, setShowNotify]      = useState(false)
-  const [showInjectModal, setShowInjectModal] = useState(false)
+  const [preview, setPreview]            = useState<InjectionPreview | null>(null)
+  const [preparing, setPreparing]        = useState<InjectionMode | null>(null)
 
   const { data: topo }                   = useSWR('topology',  fetchTopology, { refreshInterval: 30_000 })
   const { data: catalog = [] }           = useSWR('catalog',   fetchCatalog,  { revalidateOnFocus: false })
@@ -1068,10 +971,17 @@ export default function Incidents() {
   const past    = scenarios.filter(s => s.status !== 'running')
   const sorted  = [...running, ...past]
 
-  async function handleInject(impact: ImpactLevel) {
-    setShowInjectModal(false)
+  async function openInjection(mode: InjectionMode) {
+    setPreparing(mode); setInjectErr(null)
+    try { setPreview(await prepareInjection(mode)) }
+    catch (e) { setInjectErr(e instanceof Error ? e.message : String(e)) }
+    finally { setPreparing(null) }
+  }
+
+  async function handleInject() {
+    if (!preview) return
     setInjecting(true); setInjectErr(null)
-    try { await injectRandomChaos(impact); mutate('scenarios') }
+    try { await executeInjection(preview); setPreview(null); mutate('scenarios') }
     catch (e) { setInjectErr(e instanceof Error ? e.message : String(e)) }
     finally { setInjecting(false) }
   }
@@ -1093,13 +1003,8 @@ export default function Incidents() {
             <Bell className="w-3.5 h-3.5" />
             Notify
           </button>
-          <button
-            onClick={() => setShowInjectModal(true)}
-            disabled={injecting}
-            className="flex items-center gap-2 px-4 py-1.5 rounded-lg bg-danger/10 border border-danger/30 text-danger hover:bg-danger/20 text-sm font-mono font-semibold transition-colors disabled:opacity-50"
-          >
-            {injecting ? <><Loader2 className="w-4 h-4 animate-spin" />Injecting…</> : <><Zap className="w-4 h-4" />Inject Fault</>}
-          </button>
+          <button onClick={() => openInjection('safe')} disabled={Boolean(preparing)||injecting} className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-accent/10 border border-accent/30 text-accent hover:bg-accent/20 text-xs font-mono font-semibold transition-colors disabled:opacity-50">{preparing==='safe'?<Loader2 className="w-3.5 h-3.5 animate-spin"/>:<Shield className="w-3.5 h-3.5"/>}Run Safe Simulation</button>
+          <button onClick={() => openInjection('live')} disabled={Boolean(preparing)||injecting} className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-danger/10 border border-danger/30 text-danger hover:bg-danger/20 text-xs font-mono font-semibold transition-colors disabled:opacity-50">{preparing==='live'?<Loader2 className="w-3.5 h-3.5 animate-spin"/>:<Zap className="w-3.5 h-3.5"/>}Inject Live k3s Fault</button>
         </div>
       </div>
 
@@ -1139,9 +1044,8 @@ export default function Incidents() {
           <div>
             <p className="text-slate-300 font-semibold">No incidents yet</p>
             <p className="text-xs text-slate-600 mt-1 max-w-sm">
-              Click <span className="text-danger font-mono">Inject Random Fault</span> — Phoenix picks a fault from the live catalog,
-              targets a real service, and immediately opens an incident here with a live activity stream,
-              blast radius, call-to-action, and blameless postmortem when complete.
+              Start with <span className="text-accent font-mono">Run Safe Simulation</span> for a synthetic incident, or explicitly preview and authorize a <span className="text-danger font-mono">Live k3s Fault</span>.
+              Phoenix opens the incident here with a live activity stream, blast radius, response, and verified outcome.
             </p>
           </div>
         </div>
@@ -1161,7 +1065,7 @@ export default function Incidents() {
       )}
 
       {showNotify      && <NotifyModal onClose={() => setShowNotify(false)} />}
-      {showInjectModal && <InjectModal onConfirm={handleInject} onClose={() => setShowInjectModal(false)} />}
+      {preview && <InjectionConfirmModal preview={preview} onConfirm={handleInject} onClose={() => !injecting&&setPreview(null)} executing={injecting} />}
     </div>
   )
 }

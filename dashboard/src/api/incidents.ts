@@ -2,45 +2,82 @@
 // Nothing hardcoded: fault type comes from /catalog, target from /topology.
 
 import { fetchCatalog } from './faultlib'
-import { fetchTopology } from './graph'
+import { fetchBlastRadius, fetchTopology } from './graph'
 import { triggerScenario } from './chaos'
 import type { TriggerPayload } from '../types/chaos'
-import type { TaxonomyCategory } from '../types/faultlib'
+import type { FaultDomain } from '../types/faultlib'
 
-export type ImpactLevel = 'low' | 'medium' | 'high' | 'random'
+export type InjectionMode = 'safe' | 'live'
 
-// Map user-chosen impact level → fault taxonomy categories from the live catalog
-const IMPACT_CATEGORIES: Record<ImpactLevel, TaxonomyCategory[]> = {
-  low:    ['transient', 'quota-limit'],
-  medium: ['resource-exhaustion'],
-  high:   ['cascading', 'network-partition'],
-  random: ['transient', 'cascading', 'resource-exhaustion', 'network-partition', 'quota-limit'],
+export interface InjectionPreview {
+  mode: InjectionMode
+  domain: FaultDomain
+  faultType: string
+  description: string
+  taxonomy: string
+  targetName: string
+  namespace: string
+  selector: Record<string, string>
+  durationSeconds: number
+  affectedServices: number
+  payload: TriggerPayload
 }
 
-// Duration (seconds) per impact level — higher impact = shorter window (safer)
-const IMPACT_DURATIONS: Record<ImpactLevel, number[]> = {
-  low:    [60, 90, 120],
-  medium: [30, 60, 90],
-  high:   [20, 30, 45],
-  random: [30, 60, 90, 120],
+const MODE_DOMAIN: Record<InjectionMode, FaultDomain> = {
+  safe: 'simulator',
+  live: 'chaos_mesh',
 }
 
-export async function injectRandomChaos(impact: ImpactLevel = 'random'): Promise<string> {
-  const [catalog, topo] = await Promise.all([fetchCatalog(), fetchTopology()])
+const MODE_DURATIONS: Record<InjectionMode, number[]> = {
+  safe: [60, 90, 120],
+  live: [20, 30, 45],
+}
+
+const CONTROL_PLANE = new Set(['phoenix-agent', 'phoenix-chaos', 'phoenix-dashboard'])
+const SIMULATOR_TARGETS = [
+  { resource_type: 'volume', operation: 'create' },
+  { resource_type: 'subnet', operation: 'create' },
+  { resource_type: 'instance', operation: 'provision' },
+]
+
+export async function prepareInjection(mode: InjectionMode): Promise<InjectionPreview> {
+  const catalog = await fetchCatalog()
 
   if (catalog.length === 0) throw new Error('Fault catalog is empty — faultlib may be unreachable.')
-  if (topo.nodes.length === 0) throw new Error('No topology nodes — graph service may be unreachable.')
 
-  // Filter catalog to the chosen impact level
-  const allowed = IMPACT_CATEGORIES[impact]
-  const filtered = catalog.filter(e => allowed.includes(e.taxonomy_category))
-  if (filtered.length === 0) throw new Error(`No faults in catalog match impact level "${impact}". Try "random".`)
+  const domain = MODE_DOMAIN[mode]
+  const faults = catalog.filter(entry => entry.domain === domain)
+  if (faults.length === 0) throw new Error(`No ${domain} faults are available in the live catalog.`)
 
-  const fault    = filtered[Math.floor(Math.random() * filtered.length)]
-  const durations = IMPACT_DURATIONS[impact]
+  const fault = faults[Math.floor(Math.random() * faults.length)]
+  const durations = MODE_DURATIONS[mode]
   const duration = durations[Math.floor(Math.random() * durations.length)]
 
-  const candidates = topo.nodes.filter(n => n.namespace === 'phoenix-system' && Object.keys(n.labels).length > 0)
+  if (mode === 'safe') {
+    const target = SIMULATOR_TARGETS[Math.floor(Math.random() * SIMULATOR_TARGETS.length)]
+    const payload: TriggerPayload = {
+      name: `simulation-${target.resource_type}-${fault.fault_type}-${Date.now()}`,
+      domain,
+      fault_type: fault.fault_type,
+      target,
+      duration_seconds: duration,
+    }
+    return {
+      mode, domain, faultType: fault.fault_type, description: fault.description,
+      taxonomy: fault.taxonomy_category, targetName: `${target.resource_type}/${target.operation}`,
+      namespace: 'provisioning simulator', selector: target,
+      durationSeconds: duration, affectedServices: 0, payload,
+    }
+  }
+
+  const topo = await fetchTopology()
+  if (topo.nodes.length === 0) throw new Error('No topology nodes — graph service may be unreachable.')
+
+  const candidates = topo.nodes.filter(node =>
+    node.namespace === 'phoenix-system' &&
+    Object.keys(node.labels).length > 0 &&
+    !CONTROL_PLANE.has(node.name),
+  )
   if (candidates.length === 0) throw new Error('No labelled services found in phoenix-system.')
   const target = candidates[Math.floor(Math.random() * candidates.length)]
 
@@ -55,6 +92,23 @@ export async function injectRandomChaos(impact: ImpactLevel = 'random'): Promise
     duration_seconds: duration,
   }
 
-  const scenario = await triggerScenario(payload)
+  const blast = await fetchBlastRadius(target.namespace, fault.fault_type, target.labels)
+  return {
+    mode,
+    domain,
+    faultType: fault.fault_type,
+    description: fault.description,
+    taxonomy: fault.taxonomy_category,
+    targetName: target.name,
+    namespace: target.namespace,
+    selector: target.labels,
+    durationSeconds: duration,
+    affectedServices: blast.affected_nodes.length,
+    payload,
+  }
+}
+
+export async function executeInjection(preview: InjectionPreview): Promise<string> {
+  const scenario = await triggerScenario(preview.payload)
   return scenario.id
 }
