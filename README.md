@@ -53,6 +53,14 @@ cluster (and the agent) can recover from it.
   failover needed 1. Confidence 85%. Suggested action: …"
 - **Synthetic user-journey simulation** measuring failure propagation end to end
 
+## Build Week: prove the customer survives
+
+The [`journeys/`](journeys/) service provides a cluster-free, seeded resilience
+proof loop. It generates realistic customer operations, load profiles, and
+faults; enforces safety budgets and human approval for high-risk experiments;
+then reports availability, recovery, MTTR, error-budget consumption, and whether
+the original journey passed after healing. The same seed replays the same test.
+
 ## Status
 
 | Module | Description | Status |
@@ -61,6 +69,7 @@ cluster (and the agent) can recover from it.
 | M1.2 — Chaos Injection Engine | Chaos Mesh wrapper + simulator fault control surface ([`/chaos`](chaos/)) | Complete |
 | M1.3 — Fault Library & Taxonomy Classifier | Failure-mode classification from observed events ([`/faultlib`](faultlib/)) | Complete |
 | M1.4 — Blast-Radius Graph Builder | Dependency graph from live k8s + Hubble topology ([`/graph`](graph/)) | Complete |
+| Build Week Phase 4 — Customer Journey Resilience Lab | Seeded load/fault generation, safety gates, recovery evidence ([`/journeys`](journeys/)) | Complete (cluster-free adapter) |
 | M2 — Phoenix Agent | LangGraph detect → diagnose → heal → approve → verify state machine, predictive-healing memory store, event publisher | Complete |
 | M3 — Phoenix Dashboard | React console, blast-radius graph, healing pipeline swim lanes, incident feed, fleet weakness map | Complete |
 
