@@ -39,11 +39,13 @@ spec:
             - name: memory-data
               mountPath: /data
           env:
-            - name: ANTHROPIC_API_KEY
+            - name: OPENAI_API_KEY
               valueFrom:
                 secretKeyRef:
                   name: phoenix-agent-secrets
-                  key: anthropic-api-key
+                  key: openai-api-key
+            - name: OPENAI_MODEL
+              value: "gpt-5.6-terra"
             - name: CHAOS_URL
               value: "http://phoenix-chaos.phoenix-system.svc.cluster.local"
             - name: GRAPH_URL
@@ -56,6 +58,8 @@ spec:
               value: "/data/memory.db"
             - name: POLL_INTERVAL_SECONDS
               value: "10"
+            - name: WORLD_MODEL_URL
+              value: "http://sentinel-world-model.sentinel-platform.svc.cluster.local:8000"
           resources:
             requests:
               cpu: "100m"

@@ -7,9 +7,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Config(BaseSettings):
-    # Anthropic
-    ANTHROPIC_API_KEY: str = ""
-    CLAUDE_MODEL: str = "claude-sonnet-4-6"
+    # OpenAI
+    OPENAI_API_KEY: str = ""
+    OPENAI_MODEL: str = "gpt-5.6-terra"
 
     # In-cluster service URLs (k8s DNS)
     CHAOS_URL: str = "http://phoenix-chaos.phoenix-system.svc.cluster.local"
@@ -24,7 +24,10 @@ class Config(BaseSettings):
     # Memory store
     DB_PATH: str = "/data/memory.db"
 
-    # Event bus (stub: structured log; swap for Redis when sentinel-platform M0 lands)
+    # Sentinel platform
+    WORLD_MODEL_URL: str = ""
+
+    # Event bus
     SOURCE_AGENT: str = "phoenix"
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")

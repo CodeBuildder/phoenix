@@ -24,8 +24,46 @@ from nodes import detect, diagnose, heal_plan, approve, execute, verify, report
 from store import RunStore
 from memory import MemoryStore
 from events import Severity, publish_event
+import world_model as wm
 
 log = structlog.get_logger()
+
+
+async def _update_world_model(run: AgentRun) -> None:
+    """Post-pipeline: update trust ledger, calibration, and SLO budget."""
+    if run.diagnosis is None:
+        return
+
+    action_type = run.diagnosis.recommended_action
+    scenario    = run.scenario
+    fault_type  = scenario.get("fault_type", "unknown")
+    namespace   = scenario.get("namespace", "phoenix-system")
+    service     = scenario.get("target_deployment") or scenario.get("target")
+
+    # Was the healing prediction correct?
+    verify_ok   = (run.verify_result or "").lower().startswith("success")
+    outcome     = "success" if verify_ok else "surprise"
+    brier       = 0.0 if verify_ok else 1.0
+
+    await asyncio.gather(
+        wm.update_trust(action_type, outcome, brier_score=brier),
+        wm.record_calibration(
+            action_id=run.scenario_id,
+            action_type=action_type,
+            predicted_outcome="resolved",
+            actual_outcome="resolved" if verify_ok else "unresolved",
+        ),
+        *(
+            [wm.burn_slo_budget(
+                service_id=f"service/{namespace}/{service}",
+                duration_minutes=(run.mttr_seconds or 0) / 60,
+                scenario_id=run.scenario_id,
+            )]
+            if service and run.mttr_seconds
+            else []
+        ),
+        return_exceptions=True,
+    )
 
 
 async def run_pipeline(
@@ -87,6 +125,9 @@ async def run_pipeline(
 
         await _save(run, AgentNode.DONE)
         log.info("runner.done", scenario_id=run.scenario_id, mttr=run.mttr_seconds)
+
+        # ── WORLD MODEL: trust ledger + SLO budget ───────────────────────────
+        await _update_world_model(run)
 
     except asyncio.CancelledError:
         run.node  = AgentNode.ERROR

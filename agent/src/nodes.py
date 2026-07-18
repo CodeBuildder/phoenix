@@ -9,7 +9,7 @@ Node sequence:
   DETECT → DIAGNOSE → HEAL_PLAN → EXECUTE (low-risk) or APPROVE → EXECUTE → VERIFY → REPORT
 
 All reasoning data comes from real API calls — no hardcoded strings, no
-fabricated causal chains. Claude reads the live blast-radius graph, catalog
+fabricated causal chains. OpenAI reads the live blast-radius graph, catalog
 entry, and memory context to reconstruct the causal chain and pick an action.
 """
 
@@ -20,7 +20,7 @@ import json
 import re
 from datetime import datetime, timezone
 
-import anthropic
+from openai import AsyncOpenAI
 import structlog
 
 from config import config
@@ -35,7 +35,7 @@ from tools import (
 )
 
 log = structlog.get_logger()
-_anthropic = anthropic.AsyncAnthropic(api_key=config.ANTHROPIC_API_KEY)
+_openai = AsyncOpenAI(api_key=config.OPENAI_API_KEY)
 
 
 # ── detect ────────────────────────────────────────────────────────────────────
@@ -103,7 +103,7 @@ Risk guidance:
 
 async def diagnose(run: AgentRun, memory_context: str) -> AgentRun:
     """
-    Call Claude with the real scenario + blast-radius + catalog data.
+    Call OpenAI with the real scenario + blast-radius + catalog data.
     Extract a structured DiagnosisResult.
     """
     run.memory_context = memory_context
@@ -131,16 +131,16 @@ The scenario targets namespace: {target_ns}
 The scenario id is: {run.scenario_id}
 """
 
-    message = await _anthropic.messages.create(
-        model=config.CLAUDE_MODEL,
-        max_tokens=512,
-        system=_DIAGNOSE_SYSTEM,
-        messages=[{"role": "user", "content": user_prompt}],
+    response = await _openai.responses.create(
+        model=config.OPENAI_MODEL,
+        instructions=_DIAGNOSE_SYSTEM,
+        input=user_prompt,
+        max_output_tokens=512,
     )
 
-    raw = message.content[0].text.strip()
+    raw = response.output_text.strip()
 
-    # Strip markdown fences if Claude wrapped the JSON anyway
+    # Strip markdown fences if the model wrapped the JSON anyway
     raw = re.sub(r"^```(?:json)?\s*", "", raw)
     raw = re.sub(r"\s*```$", "", raw)
 
@@ -151,7 +151,7 @@ The scenario id is: {run.scenario_id}
         log.warning("node.diagnose.parse_error", error=str(exc), raw=raw[:200])
         # Fallback: safe default — stop the scenario
         run.diagnosis = DiagnosisResult(
-            causal_chain=f"Parse error on Claude response. Raw: {raw[:300]}",
+            causal_chain=f"Parse error on OpenAI response. Raw: {raw[:300]}",
             recommended_action="stop_scenario",
             action_target=run.scenario_id,
             risk="low",
@@ -285,7 +285,7 @@ async def approve(run: AgentRun, run_store) -> AgentRun:
 
 async def execute(run: AgentRun) -> AgentRun:
     """
-    Run the remediation action recommended by Claude.
+    Run the remediation action recommended by OpenAI.
     Maps action name → tool call. Records the result string.
     """
     if run.diagnosis is None:

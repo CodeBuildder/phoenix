@@ -3,14 +3,14 @@ import useSWR from 'swr'
 import { fetchScenarios, stopScenario } from '../api/chaos'
 import { fetchBlastRadius } from '../api/graph'
 import { fetchRankings } from '../api/faultlib'
-import { fetchRuns, approveAction, rejectAction, type AgentRun, type AgentNode } from '../api/agent'
+import { fetchRuns, fetchMemory, approveAction, rejectAction, type AgentRun, type AgentNode, type MemoryRecord } from '../api/agent'
 import type { Scenario } from '../types/chaos'
 import type { BlastRadiusResponse, AffectedNode } from '../types/graph'
 import type { ComponentRanking } from '../types/faultlib'
 import {
   Activity, AlertTriangle, CheckCircle2, ChevronRight, Clock,
   Loader2, RefreshCw, Shield, Square, Zap, ThumbsUp, ThumbsDown,
-  Brain, Wrench,
+  Brain, Wrench, Database, TrendingDown, TrendingUp,
 } from 'lucide-react'
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -149,6 +149,258 @@ function useTick(scenario: Scenario) {
   }, [scenario.status])
 }
 
+// ── node → pipeline depth (0–4) ──────────────────────────────────────────────
+
+const NODE_DEPTH: Record<AgentNode, number> = {
+  detect: 0, diagnose: 1, heal_plan: 2, approve: 2,
+  execute: 3, verify: 3, report: 4, done: 4, aborted: 2, error: -1,
+}
+const STAGE_LABELS = ['Detect', 'Diagnose', 'Heal', 'Verify', 'Done']
+
+// ── command center ────────────────────────────────────────────────────────────
+
+function CommandCenter({
+  agentRuns,
+  memoryRecords,
+  running,
+  agentOnline,
+}: {
+  agentRuns:     AgentRun[]
+  memoryRecords: MemoryRecord[]
+  running:       number
+  agentOnline:   boolean
+}) {
+  const done    = agentRuns.filter(r => r.node === 'done')
+  const failed  = agentRuns.filter(r => r.node === 'error' || r.node === 'aborted')
+  const inFlight = agentRuns.filter(r => !['done', 'error', 'aborted'].includes(r.node))
+  const total   = agentRuns.length
+
+  const mttrs   = done.filter(r => r.mttr_seconds != null).map(r => r.mttr_seconds as number)
+  const avgMttr = mttrs.length ? Math.round(mttrs.reduce((a,b) => a+b,0) / mttrs.length) : null
+  const autoRate = total > 0 ? Math.round((done.length / total) * 100) : null
+
+  // Last 12 completed runs for MTTR sparkline
+  const sparkRuns = [...done.filter(r => r.mttr_seconds != null)]
+    .sort((a,b) => (a.started_at > b.started_at ? 1 : -1))
+    .slice(-12)
+  const sparkMax  = Math.max(...sparkRuns.map(r => r.mttr_seconds as number), 1)
+
+  // Memory intelligence: group by fault_type
+  const memByFault = new Map<string, MemoryRecord[]>()
+  for (const r of memoryRecords) {
+    const list = memByFault.get(r.fault_type) ?? []
+    list.push(r)
+    memByFault.set(r.fault_type, list)
+  }
+  const intelRows = [...memByFault.entries()]
+    .map(([ft, recs]) => {
+      const success = recs.filter(r => r.outcome === 'success').length
+      const conf    = Math.round((success / recs.length) * 100)
+      const bestAction = recs.filter(r => r.outcome === 'success')[0]?.action_taken ?? recs[0]?.action_taken
+      return { ft, count: recs.length, success, conf, bestAction }
+    })
+    .sort((a,b) => b.count - a.count)
+    .slice(0, 4)
+
+  return (
+    <div className="grid grid-cols-3 gap-3">
+
+      {/* ── left: live telemetry ──────────────────────────────────────── */}
+      <div className="bg-card border border-border rounded-xl p-4 space-y-4">
+        {/* status row */}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <span className="relative flex h-2.5 w-2.5">
+              {agentOnline && (
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-accent opacity-60" />
+              )}
+              <span className={`relative inline-flex rounded-full h-2.5 w-2.5 ${agentOnline ? 'bg-accent' : 'bg-slate-600'}`} />
+            </span>
+            <span className={`text-xs font-mono font-bold ${agentOnline ? 'text-accent' : 'text-slate-500'}`}>
+              {agentOnline ? 'AGENT LIVE' : 'AGENT OFFLINE'}
+            </span>
+          </div>
+          {inFlight.length > 0 && (
+            <span className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-danger/10 border border-danger/20 text-[10px] font-mono text-danger">
+              <Loader2 className="w-2.5 h-2.5 animate-spin" />
+              {inFlight.length} in flight
+            </span>
+          )}
+        </div>
+
+        {/* metrics grid */}
+        <div className="grid grid-cols-2 gap-2">
+          {[
+            { label: 'PIPELINE RUNS',   value: total,                           sub: `${running} scenarios active`,      color: 'text-slate-100' },
+            { label: 'AUTO-RESOLVED',   value: autoRate != null ? `${autoRate}%` : '—', sub: `${done.length} of ${total} done`, color: autoRate != null && autoRate >= 80 ? 'text-accent' : autoRate != null && autoRate >= 50 ? 'text-warning' : 'text-slate-400' },
+            { label: 'AVG MTTR',        value: avgMttr != null ? fmtSec(avgMttr) : '—', sub: `${mttrs.length} samples`,   color: 'text-violet' },
+            { label: 'MEMORY DEPTH',    value: memoryRecords.length,            sub: `${memByFault.size} fault patterns`, color: 'text-cyan' },
+          ].map(m => (
+            <div key={m.label} className="bg-elevated/40 rounded-lg px-3 py-2.5">
+              <p className="text-[9px] font-mono text-slate-600 uppercase tracking-widest">{m.label}</p>
+              <p className={`text-lg font-mono font-bold mt-0.5 ${m.color}`}>{m.value}</p>
+              <p className="text-[9px] font-mono text-slate-700 mt-0.5 truncate">{m.sub}</p>
+            </div>
+          ))}
+        </div>
+
+        {/* failed/aborted count */}
+        {failed.length > 0 && (
+          <div className="flex items-center gap-2 px-2 py-1.5 rounded-lg bg-danger/5 border border-danger/15 text-[10px] font-mono text-danger/80">
+            <AlertTriangle className="w-3 h-3 shrink-0" />
+            {failed.length} run{failed.length !== 1 ? 's' : ''} errored or aborted — check logs
+          </div>
+        )}
+      </div>
+
+      {/* ── middle: MTTR run history ──────────────────────────────────── */}
+      <div className="bg-card border border-border rounded-xl p-4 space-y-3">
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-[10px] font-mono text-slate-500 uppercase tracking-widest">MTTR History</p>
+            <p className="text-[9px] font-mono text-slate-700 mt-0.5">Time-to-recover per completed run</p>
+          </div>
+          {avgMttr != null && (
+            <div className="flex items-center gap-1 text-[10px] font-mono text-violet">
+              <Clock className="w-3 h-3" />
+              avg {fmtSec(avgMttr)}
+            </div>
+          )}
+        </div>
+
+        {sparkRuns.length === 0 ? (
+          <div className="flex-1 flex items-center justify-center h-24 text-[10px] font-mono text-slate-700">
+            No completed runs yet
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {/* bar chart */}
+            <div className="flex items-end gap-1 h-20">
+              {sparkRuns.map((r, i) => {
+                const pct = ((r.mttr_seconds as number) / sparkMax) * 100
+                const isLast = i === sparkRuns.length - 1
+                return (
+                  <div key={r.scenario_id} className="flex-1 flex flex-col items-center gap-0.5 group relative">
+                    <div
+                      className={`w-full rounded-sm transition-all ${isLast ? 'bg-accent' : 'bg-violet/40 group-hover:bg-violet/70'}`}
+                      style={{ height: `${Math.max(pct, 4)}%` }}
+                    />
+                    {/* tooltip */}
+                    <div className="absolute bottom-full mb-1 left-1/2 -translate-x-1/2 hidden group-hover:flex flex-col items-center z-10">
+                      <div className="bg-elevated border border-border rounded px-1.5 py-1 text-[9px] font-mono text-slate-300 whitespace-nowrap">
+                        {fmtSec(r.mttr_seconds as number)}
+                      </div>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+            {/* x-axis labels */}
+            <div className="flex justify-between text-[8px] font-mono text-slate-700">
+              <span>oldest</span>
+              <span className="text-accent">latest</span>
+            </div>
+          </div>
+        )}
+
+        {/* recent run pipeline pills */}
+        <div className="space-y-1.5 border-t border-border/30 pt-2.5">
+          <p className="text-[9px] font-mono text-slate-700 uppercase tracking-widest">Recent runs</p>
+          {agentRuns.slice(0, 4).map(r => {
+            const depth  = NODE_DEPTH[r.node] ?? -1
+            const svc    = (r.scenario as { name?: string }).name?.replace(/^incident-/, '').replace(/-\d{10,}$/, '') ?? r.scenario_id.slice(0, 12)
+            const isDone = r.node === 'done'
+            const isErr  = r.node === 'error' || r.node === 'aborted'
+            return (
+              <div key={r.scenario_id} className="flex items-center gap-2">
+                <p className="text-[9px] font-mono text-slate-500 truncate w-24 shrink-0">{svc}</p>
+                {/* stage dots */}
+                <div className="flex items-center gap-0.5 flex-1">
+                  {STAGE_LABELS.map((_, i) => (
+                    <div
+                      key={i}
+                      className={`flex-1 h-1 rounded-full ${
+                        isErr && depth === i ? 'bg-danger' :
+                        i <= depth ? (isDone ? 'bg-accent' : 'bg-violet') : 'bg-elevated'
+                      }`}
+                    />
+                  ))}
+                </div>
+                <span className={`text-[9px] font-mono shrink-0 ${isDone ? 'text-accent' : isErr ? 'text-danger' : 'text-slate-600 animate-pulse'}`}>
+                  {r.node}
+                </span>
+              </div>
+            )
+          })}
+          {agentRuns.length === 0 && (
+            <p className="text-[10px] font-mono text-slate-700">No runs yet</p>
+          )}
+        </div>
+      </div>
+
+      {/* ── right: Phoenix intelligence ───────────────────────────────── */}
+      <div className="bg-card border border-border rounded-xl p-4 space-y-3">
+        <div className="flex items-center gap-2">
+          <Brain className="w-3.5 h-3.5 text-violet" />
+          <div>
+            <p className="text-[10px] font-mono text-slate-500 uppercase tracking-widest">Phoenix Intelligence</p>
+            <p className="text-[9px] font-mono text-slate-700 mt-0.5">Learned from {memoryRecords.length} past incident{memoryRecords.length !== 1 ? 's' : ''}</p>
+          </div>
+        </div>
+
+        {intelRows.length === 0 ? (
+          <div className="flex-1 flex items-center justify-center h-24 text-center text-[10px] font-mono text-slate-700 leading-relaxed">
+            Memory builds as Phoenix resolves incidents.<br />
+            Inject faults to start learning.
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {intelRows.map(row => (
+              <div key={row.ft} className="bg-elevated/30 rounded-lg px-3 py-2 space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-mono text-slate-300 font-semibold">{row.ft}</span>
+                  <div className="flex items-center gap-1">
+                    {row.conf >= 80 ? (
+                      <TrendingUp className="w-3 h-3 text-accent" />
+                    ) : row.conf >= 50 ? (
+                      <TrendingDown className="w-3 h-3 text-warning" />
+                    ) : (
+                      <TrendingDown className="w-3 h-3 text-danger" />
+                    )}
+                    <span className={`text-[10px] font-mono font-bold ${
+                      row.conf >= 80 ? 'text-accent' : row.conf >= 50 ? 'text-warning' : 'text-danger'
+                    }`}>{row.conf}%</span>
+                  </div>
+                </div>
+                {/* confidence bar */}
+                <div className="h-1 bg-elevated rounded-full overflow-hidden">
+                  <div
+                    className={`h-full rounded-full transition-all ${
+                      row.conf >= 80 ? 'bg-accent' : row.conf >= 50 ? 'bg-warning' : 'bg-danger'
+                    }`}
+                    style={{ width: `${row.conf}%` }}
+                  />
+                </div>
+                <div className="flex items-center justify-between text-[9px] font-mono text-slate-600">
+                  <span>{row.count}× seen · {row.success}/{row.count} resolved</span>
+                  <span className="text-slate-500 truncate ml-2">{row.bestAction}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {memoryRecords.length > 0 && (
+          <div className="flex items-center gap-2 px-2 py-1.5 rounded-lg bg-violet/5 border border-violet/15 text-[9px] font-mono text-slate-600">
+            <Database className="w-3 h-3 text-violet shrink-0" />
+            Confidence scores fed into OpenAI's diagnose prompt on every new incident
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 // ── lane card ─────────────────────────────────────────────────────────────────
 
 function LaneCard({
@@ -162,6 +414,7 @@ function LaneCard({
   agentRun:  AgentRun | null
   onMutate:  () => void
 }) {
+  const [expanded, setExpanded]   = useState(false)
   const [stopping, setStopping]   = useState(false)
   const [approving, setApproving] = useState(false)
   const [rejecting, setRejecting] = useState(false)
@@ -199,10 +452,17 @@ function LaneCard({
     try { await rejectAction(scenario.id); onMutate() } finally { setRejecting(false) }
   }
 
+  const endedAt = scenario.stopped_at
+    ? new Date(scenario.stopped_at).toLocaleTimeString()
+    : null
+
   return (
-    <div className={`rounded-lg border bg-card p-3 space-y-2.5 text-[11px] font-mono ${meta.border}`}>
-      {/* header */}
-      <div className="flex items-start gap-2">
+    <div className={`rounded-lg border bg-card text-[11px] font-mono ${meta.border}`}>
+      {/* header — clickable to expand */}
+      <div
+        className="flex items-start gap-2 p-3 cursor-pointer select-none"
+        onClick={() => setExpanded(e => !e)}
+      >
         <span className="relative flex h-2 w-2 mt-0.5 shrink-0">
           {scenario.status === 'running' && (
             <span className={`animate-ping absolute inline-flex h-full w-full rounded-full ${meta.dot} opacity-50`} />
@@ -216,7 +476,21 @@ function LaneCard({
         {sev !== 'low' && (
           <span className={`text-[10px] font-bold uppercase shrink-0 ${SEV_TEXT[sev]}`}>{sev}</span>
         )}
+        <span className="text-slate-700 text-[10px] shrink-0 ml-1">{expanded ? '▲' : '▼'}</span>
       </div>
+
+      {/* collapsed summary */}
+      {!expanded && (
+        <div className="px-3 pb-2.5 text-[10px] text-slate-600 border-t border-border/20 pt-2">
+          {scenario.status === 'running' ? `${fmtSec(age)} elapsed` : endedAt ? `ended ${endedAt}` : scenario.status}
+          {m !== null && <span className="ml-2 text-slate-700">MTTR {fmtSec(m)}</span>}
+          {agentRun && <span className="ml-2 text-accent/50">{agentRun.node}</span>}
+        </div>
+      )}
+
+      {/* expanded detail */}
+      {expanded && (
+      <div className="px-3 pb-3 space-y-2.5 border-t border-border/20 pt-2.5">
 
       {/* ── DETECT ──────────────────────────────────────────────────── */}
       {column === 'detect' && (
@@ -271,7 +545,7 @@ function LaneCard({
               )}
               <div className="flex items-center gap-1.5 text-slate-700 border-t border-border/40 pt-1.5 mt-1">
                 <Loader2 className="w-3 h-3 animate-spin" />
-                Claude analyzing causal chain…
+                OpenAI analyzing causal chain…
               </div>
             </>
           )}
@@ -442,20 +716,76 @@ function LaneCard({
               {affected.length > 2 ? ` +${affected.length - 2} more` : ''}
             </p>
           )}
+
+          {/* full detail rows */}
+          <div className="space-y-1 text-[10px] border-t border-border/30 pt-1.5 mt-0.5">
+            <div className="flex justify-between text-slate-600">
+              <span>Fault injected</span>
+              <span className="text-slate-400">{scenario.fault_type}</span>
+            </div>
+            <div className="flex justify-between text-slate-600">
+              <span>Domain</span>
+              <span className="text-slate-400">{scenario.domain}</span>
+            </div>
+            {scenario.duration_seconds && (
+              <div className="flex justify-between text-slate-600">
+                <span>Duration</span>
+                <span className="text-slate-400">{fmtSec(scenario.duration_seconds)}</span>
+              </div>
+            )}
+            <div className="flex justify-between text-slate-600">
+              <span>How it ended</span>
+              <span className="text-slate-400">{
+                scenario.status === 'completed' ? 'auto (duration)' :
+                scenario.status === 'stopped'   ? 'manual stop' :
+                scenario.status === 'failed'    ? 'error' : scenario.status
+              }</span>
+            </div>
+            {affected.length > 0 && (
+              <div className="mt-1 space-y-0.5">
+                <p className="text-slate-700 uppercase tracking-widest text-[9px]">Affected services</p>
+                {affected.map(n => (
+                  <div key={n.node_id} className="flex items-center gap-1.5">
+                    <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                      n.severity === 'high' ? 'bg-danger' : n.severity === 'medium' ? 'bg-warning' : 'bg-accent'
+                    }`} />
+                    <span className="text-slate-400 truncate flex-1">{n.name}</span>
+                    <span className={`shrink-0 ${SEV_TEXT[n.severity]}`}>{n.severity}</span>
+                    <span className="text-slate-700">{n.distance_hops}h</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            {agentRun?.diagnosis && (
+              <div className="mt-1 pt-1 border-t border-border/30 space-y-0.5">
+                <p className="text-slate-700 uppercase tracking-widest text-[9px]">Phoenix diagnosis</p>
+                <p className="text-slate-500 leading-relaxed">{agentRun.diagnosis.causal_chain}</p>
+                <p className="text-slate-600">
+                  Action: <span className="text-accent">{agentRun.diagnosis.recommended_action}</span>
+                  {' → '}<span className="text-slate-400">{agentRun.diagnosis.action_target}</span>
+                </p>
+                {agentRun.action_result && (
+                  <p className="text-accent/70">{agentRun.action_result}</p>
+                )}
+              </div>
+            )}
+          </div>
         </div>
       )}
 
       {/* footer */}
-      <div className="text-[10px] text-slate-700 border-t border-border/30 pt-1.5">
+      <div className="text-[10px] text-slate-700 border-t border-border/30 pt-1.5 mt-1">
         {scenario.started_at && (
           scenario.status === 'running'
             ? `${fmtSec(age)} elapsed`
-            : `ended ${new Date(scenario.stopped_at ?? '').toLocaleTimeString()}`
+            : endedAt ? `ended ${endedAt}` : scenario.status
         )}
-        {agentRun && (
-          <span className="ml-2 text-accent/60">agent: {agentRun.node}</span>
-        )}
+        {m !== null && <span className="ml-2 text-slate-600">MTTR {fmtSec(m)}</span>}
+        {agentRun && <span className="ml-2 text-accent/60">agent: {agentRun.node}</span>}
       </div>
+
+      </div>
+      )}
     </div>
   )
 }
@@ -502,8 +832,10 @@ function LaneColumn({
 // ── failure-mode rankings ─────────────────────────────────────────────────────
 
 function FailureModeRankings({ rankings, total }: { rankings: ComponentRanking[]; total: number }) {
-  const sorted = [...rankings].sort((a, b) => b.tallies.total - a.tallies.total)
-  const maxTotal = sorted[0]?.tallies.total ?? 1
+  const sorted = [...rankings]
+    .filter(r => r.tallies != null)
+    .sort((a, b) => (b.tallies?.total ?? 0) - (a.tallies?.total ?? 0))
+  const maxTotal = sorted[0]?.tallies?.total ?? 1
 
   const CATEGORY_COLOR: Record<string, string> = {
     cascading:           'bg-danger/60',
@@ -559,13 +891,13 @@ function FailureModeRankings({ rankings, total }: { rankings: ComponentRanking[]
           </thead>
           <tbody>
             {sorted.map((r, i) => {
-              const t = r.tallies
+              const t = r.tallies ?? {}
               const segments = [
-                { key: 'cascading',           val: t.cascading },
-                { key: 'network_partition',    val: t.network_partition },
-                { key: 'resource_exhaustion',  val: t.resource_exhaustion },
-                { key: 'transient',            val: t.transient },
-                { key: 'quota_limit',          val: t.quota_limit },
+                { key: 'cascading',           val: t.cascading           ?? 0 },
+                { key: 'network_partition',    val: t.network_partition    ?? 0 },
+                { key: 'resource_exhaustion',  val: t.resource_exhaustion  ?? 0 },
+                { key: 'transient',            val: t.transient            ?? 0 },
+                { key: 'quota_limit',          val: t.quota_limit          ?? 0 },
               ].filter(s => s.val > 0)
 
               return (
@@ -640,6 +972,14 @@ export default function Agent() {
   const { data: rankingsData, error: rankingsError } = useSWR(
     'rankings', fetchRankings, { revalidateOnFocus: false },
   )
+  const { data: memoryRecords = [] } = useSWR(
+    'agent-memory', fetchMemory, { refreshInterval: 30_000,
+      onErrorRetry: (_, __, ___, revalidate, { retryCount }) => {
+        if (retryCount >= 2) return
+        setTimeout(() => revalidate({ retryCount }), 10_000)
+      },
+    },
+  )
 
   const agentRunMap = new Map<string, AgentRun>(agentRuns.map(r => [r.scenario_id, r]))
   const agentOnline = !agentError
@@ -683,7 +1023,7 @@ export default function Agent() {
             <p className="text-xs font-mono font-semibold text-accent">Phoenix Agent — live</p>
             <p className="text-[11px] font-mono text-slate-500 mt-0.5">
               Agent picks up every running scenario within {10}s. Cards in
-              {' '}<span className="text-violet">Diagnose</span> show Claude's real causal chain,
+              {' '}<span className="text-violet">Diagnose</span> show OpenAI's real causal chain,
               {' '}<span className="text-accent">Heal</span> shows the remediation action in flight,
               and {' '}<span className="text-danger">Approve</span> surfaces the human-approval gate for high-risk actions.
             </p>
@@ -702,20 +1042,13 @@ export default function Agent() {
         </div>
       )}
 
-      {/* stats bar */}
-      <div className="grid grid-cols-4 gap-3">
-        {[
-          { label: 'Total scenarios', value: scenarios.length,    color: 'text-slate-200' },
-          { label: 'Active faults',   value: running,             color: running > 0 ? 'text-danger' : 'text-slate-400' },
-          { label: 'Resolved',        value: resolved,            color: 'text-accent' },
-          { label: 'Avg MTTR',        value: avgMttr !== null ? fmtSec(avgMttr) : '—', color: 'text-slate-300' },
-        ].map(stat => (
-          <div key={stat.label} className="bg-card border border-border rounded-lg px-4 py-3">
-            <p className="text-[10px] font-mono text-slate-600 uppercase tracking-widest">{stat.label}</p>
-            <p className={`text-xl font-mono font-bold mt-1 ${stat.color}`}>{stat.value}</p>
-          </div>
-        ))}
-      </div>
+      {/* command center */}
+      <CommandCenter
+        agentRuns={agentRuns}
+        memoryRecords={memoryRecords}
+        running={running}
+        agentOnline={agentOnline}
+      />
 
       {/* pipeline breadcrumb */}
       <div className="flex items-center gap-2 text-[10px] font-mono text-slate-700">

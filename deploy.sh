@@ -15,6 +15,11 @@
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# Load .env if present (secrets — gitignored)
+if [ -f "$SCRIPT_DIR/.env" ]; then
+  set -a; source "$SCRIPT_DIR/.env"; set +a
+fi
+
 # ── config ────────────────────────────────────────────────────────────────────
 
 NAMESPACE="phoenix-system"
@@ -24,38 +29,13 @@ SSH_OPTS="-i $SSH_KEY -o StrictHostKeyChecking=no -o ConnectTimeout=10"
 
 ALL_SERVICES=(sim chaos faultlib graph dashboard agent)
 
-# service → image name
-declare -A IMAGE=(
-  [sim]=phoenix-sim
-  [chaos]=phoenix-chaos
-  [faultlib]=phoenix-faultlib
-  [graph]=phoenix-graph
-  [dashboard]=phoenix-dashboard
-  [agent]=phoenix-agent
-)
-
-# service → k8s deployment name
-declare -A DEPLOY_NAME=(
-  [sim]=phoenix-sim
-  [chaos]=phoenix-chaos
-  [faultlib]=phoenix-faultlib
-  [graph]=phoenix-graph
-  [dashboard]=phoenix-dashboard
-  [agent]=phoenix-agent
-)
-
 # services that have k8s/rbac.yaml
 RBAC_SERVICES=(chaos graph agent)
 
-# port-forward hints (local:remote) shown at the end
-declare -A PORTS=(
-  [sim]="8083:80"
-  [chaos]="8082:80"
-  [faultlib]="8081:80"
-  [graph]="8080:80"
-  [dashboard]="3000:80"
-  [agent]="8084:80"
-)
+# Lookup helpers — bash 3.x compatible (no associative arrays)
+svc_image()  { case "$1" in sim) echo phoenix-sim ;; chaos) echo phoenix-chaos ;; faultlib) echo phoenix-faultlib ;; graph) echo phoenix-graph ;; dashboard) echo phoenix-dashboard ;; agent) echo phoenix-agent ;; esac }
+svc_deploy() { case "$1" in sim) echo phoenix-sim ;; chaos) echo phoenix-chaos ;; faultlib) echo phoenix-faultlib ;; graph) echo phoenix-graph ;; dashboard) echo phoenix-dashboard ;; agent) echo phoenix-agent ;; esac }
+svc_port()   { case "$1" in sim) echo "8083:80" ;; chaos) echo "8082:80" ;; faultlib) echo "8081:80" ;; graph) echo "8080:80" ;; dashboard) echo "3000:80" ;; agent) echo "8084:80" ;; esac }
 
 # ── colors ────────────────────────────────────────────────────────────────────
 
@@ -112,12 +92,12 @@ preflight() {
 
   # Create agent secret if deploying agent and key is set
   if [[ " ${SELECTED[*]} " == *" agent "* ]]; then
-    local api_key="${ANTHROPIC_API_KEY:-}"
+    local api_key="${OPENAI_API_KEY:-}"
     if [ -z "$api_key" ]; then
-      warn "ANTHROPIC_API_KEY not set — agent will start but cannot call Claude. Set it and re-run."
+      warn "OPENAI_API_KEY not set — agent will start but cannot call OpenAI. Set it and re-run."
     else
       kubectl create secret generic phoenix-agent-secrets \
-        --from-literal=anthropic-api-key="$api_key" \
+        --from-literal=openai-api-key="$api_key" \
         --namespace="$NAMESPACE" \
         --dry-run=client -o yaml | kubectl apply -f - &>/dev/null
       ok "Agent secret applied"
@@ -173,8 +153,8 @@ build_dashboard_frontend() {
 deploy_service() {
   local svc="$1"
   local dir="$SCRIPT_DIR/$svc"
-  local image="${IMAGE[$svc]}"
-  local deploy="${DEPLOY_NAME[$svc]}"
+  local image; image="$(svc_image "$svc")"
+  local deploy; deploy="$(svc_deploy "$svc")"
 
   echo ""
   echo -e "${BOLD}── $svc ──────────────────────────────────────────────${NC}"
@@ -245,15 +225,15 @@ start_port_forwards() {
 
   # Kill any existing port-forwards for these services to avoid conflicts
   for svc in "${SELECTED[@]}"; do
-    local local_port="${PORTS[$svc]%%:*}"
+    local local_port; local_port="$(svc_port "$svc")"; local_port="${local_port%%:*}"
     lsof -ti :"$local_port" 2>/dev/null | xargs kill -9 2>/dev/null || true
   done
 
   sleep 0.5
 
   for svc in "${SELECTED[@]}"; do
-    local port="${PORTS[$svc]}"
-    local name="${DEPLOY_NAME[$svc]}"
+    local port; port="$(svc_port "$svc")"
+    local name; name="$(svc_deploy "$svc")"
     local local_port="${port%%:*}"
     kubectl port-forward -n "$NAMESPACE" "svc/$name" "$port" \
       --address=127.0.0.1 &>/dev/null &
@@ -275,7 +255,7 @@ start_port_forwards() {
   echo ""
   echo -e "${BOLD}Logs:${NC}"
   for svc in "${SELECTED[@]}"; do
-    local name="${DEPLOY_NAME[$svc]}"
+    local name; name="$(svc_deploy "$svc")"
     printf "  %-12s kubectl logs -n %s -l app=%s -f\n" "$svc" "$NAMESPACE" "$name"
   done
   echo ""

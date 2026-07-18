@@ -2,28 +2,14 @@
 Phoenix Agent — event publisher  (#11)
 Copyright (c) 2026 Kaushikkumaran
 
-Mirrors chaos/src/events.py exactly: structured-log stub, same field names
-as sentinel-platform's M0 schema, same Loki-queryable output pattern.
+M0 stub: structured-log + World Model write.
+M1 (this file): publishes to both structlog (backward compat) AND
+posts key events to the World Model findings API as source="phoenix".
 
-Swap for Redis-streams transport once sentinel-platform M0 lands:
-  1. Delete phoenix/schemas/event.schema.json (use the real one)
-  2. Replace the structlog emit below with the Redis publisher
-  3. Call sites do not need to change (same Event shape, same publish_event signature)
-
-Event types emitted by the agent:
-  phoenix.agent.run.started
-  phoenix.agent.detect.complete
-  phoenix.agent.diagnose.complete
-  phoenix.agent.heal.action_taken
-  phoenix.agent.approve.requested
-  phoenix.agent.approve.granted
-  phoenix.agent.approve.rejected
-  phoenix.agent.verify.complete
-  phoenix.agent.run.done
-  phoenix.agent.run.aborted
-  phoenix.agent.run.error
+Call sites unchanged — same signature, same Event return type.
 """
 
+import asyncio
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
@@ -59,6 +45,16 @@ class Event(BaseModel):
     payload:      dict[str, Any] = Field(default_factory=dict)
 
 
+# Event types that represent actionable findings worth posting to World Model
+_WM_EVENTS = {
+    "phoenix.agent.detect.complete",
+    "phoenix.agent.heal.action_taken",
+    "phoenix.agent.verify.complete",
+    "phoenix.agent.run.done",
+    "phoenix.agent.run.error",
+}
+
+
 def publish_event(
     event_type: str,
     *,
@@ -86,4 +82,39 @@ def publish_event(
         timestamp=event.timestamp,
         payload=event.payload,
     )
+
+    if event_type in _WM_EVENTS:
+        _fire_wm(event)
+
     return event
+
+
+def _fire_wm(event: Event) -> None:
+    """Schedule a best-effort World Model POST without blocking the caller."""
+    try:
+        loop = asyncio.get_running_loop()
+        loop.create_task(_post_to_wm(event))
+    except RuntimeError:
+        pass  # no event loop — skip (test / sync context)
+
+
+async def _post_to_wm(event: Event) -> None:
+    import hashlib, os
+    from world_model import post_finding
+
+    # Extract scenario metadata from payload for entity_id resolution
+    p       = event.payload
+    sid     = p.get("scenario_id", "unknown")
+    ns      = p.get("namespace") or config.NAMESPACE
+    service = p.get("service") or p.get("action_target")
+
+    await post_finding(
+        scenario_id=sid,
+        node=event.event_type.split(".")[-1],
+        fault_type=p.get("fault_type", "unknown"),
+        namespace=ns,
+        service=service,
+        severity=event.severity.value,
+        outcome=p.get("outcome", "unknown"),
+        payload=p,
+    )
