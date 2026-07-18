@@ -39,5 +39,8 @@ class Config:
     # gRPC call timeout in seconds for the Hubble GetFlows streaming RPC.
     HUBBLE_TIMEOUT_SECONDS: float = float(os.getenv("HUBBLE_TIMEOUT_SECONDS", "15.0"))
 
+    # Explicitly labeled, cluster-free dashboard fixture. Never enabled by default.
+    LOCAL_DEMO: bool = os.getenv("PHOENIX_LOCAL_DEMO", "false").lower() == "true"
+
 
 config = Config()

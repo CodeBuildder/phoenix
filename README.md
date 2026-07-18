@@ -78,27 +78,24 @@ build sequence and issue backlog.
 
 ## Start here
 
-For the complete Build Week judge experience, use the one-command platform path from
-the sibling Argus checkout. It starts or reuses Argus, Phoenix, Sentinel, the SOG, and
-their canonical local consoles; publishes deterministic cross-agent evidence; and
-verifies the correlated Sentinel incident before reporting success.
+For the complete Build Week judge experience, use the cluster-free one-command platform
+path from the sibling Argus checkout. It starts a disposable local SOG plus the real
+local Argus, Phoenix, and Sentinel services; builds an explicitly synthetic service
+topology; publishes deterministic cross-agent evidence; and verifies the correlated
+Sentinel incident before reporting success.
 
 ```text
 Projects/
 ├── argus-k8s/                 # run the command here
 └── sentinel-stack/
     ├── phoenix/
-    └── sentinel/
+    ├── sentinel/
+    └── sentinel-platform/
 ```
 
-Install dependencies once, select the real k3s context, and preflight without changing
-the cluster or publishing findings:
+Preflight without starting a container, process, or publishing evidence:
 
 ```bash
-make -C ../../argus-k8s setup-local
-make -C ../sentinel setup-local
-npm --prefix dashboard install
-kubectl config use-context argus
 make -C ../../argus-k8s demo-platform-dry-run
 ```
 
@@ -110,9 +107,19 @@ make -C ../../argus-k8s demo-platform
 
 Open Argus at **http://127.0.0.1:5173**, Phoenix at
 **http://127.0.0.1:5174**, and Sentinel at **http://127.0.0.1:5175**. The command
-labels the proof as `replayed` Argus evidence and a Phoenix `simulator` outcome; it
-does not inject live Chaos Mesh faults. Existing healthy processes are reused, and
-`Ctrl-C` stops only processes started by the command.
+installs missing local dependencies and labels every topology fixture as
+`synthetic_fixture`/`demo-data=synthetic`. Argus evidence is `replayed`; Phoenix outcomes
+are `simulator`. A bounded feed updates the dashboards during the presentation. No
+Kubernetes API, Hubble relay, Falco workload, or Chaos Mesh fault is used. `Ctrl-C`
+stops the local services and removes the disposable Redis container.
+
+For the real k3s-backed integration proof instead:
+
+```bash
+kubectl config use-context argus
+make -C ../../argus-k8s demo-platform-live-dry-run
+make -C ../../argus-k8s demo-platform-live
+```
 
 For Phoenix by itself, choose one of the paths below. The local path proves Phoenix's
 safe simulator workflow without touching Kubernetes. The cluster path adds live
