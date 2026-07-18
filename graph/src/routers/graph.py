@@ -9,6 +9,7 @@ from fastapi import APIRouter, HTTPException, Query
 
 from blast_radius import compute_blast_radius
 from config import config
+from demo_topology import build_demo_topology
 from hubble_client import HubbleClient
 from k8s_client import K8sTopologyClient
 from models import BlastRadiusResponse, TopologyResponse
@@ -35,6 +36,8 @@ async def get_topology() -> TopologyResponse:
 
     Every call recomputes from live data — there is no cache.
     """
+    if config.LOCAL_DEMO:
+        return build_demo_topology()
     return await build_topology(k8s, hubble)
 
 
@@ -71,7 +74,7 @@ async def get_blast_radius(
         k, _, v = pair.partition("=")
         parsed_selector[k] = v
 
-    topology = await build_topology(k8s, hubble)
+    topology = build_demo_topology() if config.LOCAL_DEMO else await build_topology(k8s, hubble)
     return compute_blast_radius(
         topology=topology,
         target_namespace=target_namespace,

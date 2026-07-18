@@ -42,6 +42,14 @@ class TestHealth:
 
 
 class TestTopologyEndpoint:
+    def test_explicit_local_demo_returns_labeled_synthetic_topology(self, client, monkeypatch):
+        monkeypatch.setattr(graph_router.config, "LOCAL_DEMO", True)
+        data = client.get("/topology").json()
+        assert data["node_count"] == 12
+        assert data["edge_count"] == 14
+        assert data["topology_sources"] == ["synthetic_fixture"]
+        assert all(node["labels"]["demo-data"] == "synthetic" for node in data["nodes"])
+
     def test_empty_cluster_returns_empty_graph(self, client):
         restore = _swap_clients(FakeK8sClient(), FakeHubbleClient())
         try:
