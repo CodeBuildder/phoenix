@@ -93,10 +93,10 @@ Projects/
     └── sentinel-platform/
 ```
 
-Preflight without starting a container, process, or publishing evidence:
+Diagnose the portable path without starting a container, process, or publishing evidence:
 
 ```bash
-make -C ../../argus-k8s demo-platform-dry-run
+make -C ../../argus-k8s doctor
 ```
 
 Launch the complete demo:
@@ -117,11 +117,12 @@ For the guarded real k3s proof instead:
 
 ```bash
 kubectl config use-context argus
-make -C ../../argus-k8s demo-platform-live-dry-run
+make -C ../../argus-k8s doctor-live
 make -C ../../argus-k8s demo-platform-live
 ```
 
-The dry-run is read-only. The live command requires the exact context and the phrase
+The doctor is read-only and ends with a `READY`/`NOT READY` verdict plus an exact next
+action. The live command requires the exact context and the phrase
 `INJECT LIVE FAULT`, creates only `sentinel-live-demo`, and continuously probes a
 two-replica HTTP target. Phoenix must create a real Chaos Mesh `PodChaos` for one
 disposable replica; the proof passes only after Kubernetes supplies a new Ready pod,
