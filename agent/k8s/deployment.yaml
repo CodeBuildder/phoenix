@@ -23,7 +23,8 @@ spec:
         fsGroup: 1000
       volumes:
         - name: memory-data
-          emptyDir: {}
+          persistentVolumeClaim:
+            claimName: phoenix-agent-history
       containers:
         - name: phoenix-agent
           image: docker.io/library/phoenix-agent:latest

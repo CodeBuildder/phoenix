@@ -21,6 +21,10 @@ spec:
         runAsNonRoot: true
         runAsUser: 1000
         fsGroup: 1000
+      volumes:
+        - name: history-data
+          persistentVolumeClaim:
+            claimName: phoenix-chaos-history
       containers:
         - name: phoenix-chaos
           image: docker.io/library/phoenix-chaos:latest
@@ -32,6 +36,9 @@ spec:
           ports:
             - containerPort: 8080
               name: http
+          volumeMounts:
+            - name: history-data
+              mountPath: /data
           env:
             - name: LOKI_URL
               value: "http://loki.monitoring.svc.cluster.local:3100"
@@ -39,6 +46,8 @@ spec:
               value: "http://phoenix-sim.phoenix-system.svc.cluster.local"
             - name: SWEEP_INTERVAL_SECONDS
               value: "5.0"
+            - name: CHAOS_DB_PATH
+              value: "/data/chaos.db"
           resources:
             requests:
               cpu: "100m"

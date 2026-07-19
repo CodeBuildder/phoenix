@@ -130,6 +130,16 @@ both replicas are Ready, measured availability is recorded, and Sentinel correla
 observed Argus evidence with Phoenix's verified recovery. `Ctrl-C` deletes only the
 isolated namespace.
 
+### Persistent evidence history
+
+Phoenix persists complete scenario and agent-run documents in SQLite: correlation IDs,
+backend references, lifecycle status, diagnosis, approvals, actions, verification,
+errors, MTTR, and timestamps. Kubernetes mounts separate persistent volume claims for
+both histories, so completed evidence remains visible after pod restarts. An unfinished
+action is retained and marked for manual review after restart; Phoenix never resumes a
+risky action implicitly. Both health endpoints expose `persistent_history`; `false`
+means the service is using a deliberately ephemeral test database.
+
 For Phoenix by itself, choose one of the paths below. The local path proves Phoenix's
 safe simulator workflow without touching Kubernetes. The cluster path adds live
 topology, Hubble flows, Chaos Mesh, and the OpenAI-powered recovery agent.

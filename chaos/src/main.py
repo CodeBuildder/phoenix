@@ -56,4 +56,5 @@ async def health():
         "status": "ok",
         "service": config.SERVICE_NAME,
         "version": "0.1.0",
+        "persistent_history": config.DB_PATH != ":memory:",
     }

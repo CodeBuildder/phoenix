@@ -6,6 +6,8 @@ Copyright (c) 2026 Kaushikkumaran
 import os
 import sys
 
+os.environ.setdefault("CHAOS_DB_PATH", ":memory:")
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 import pytest
