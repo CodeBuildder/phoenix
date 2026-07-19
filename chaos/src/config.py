@@ -54,6 +54,7 @@ class Config:
     # fault rule's continued existence) to detect natural completion/expiry
     # and publish a genuine `chaos.scenario.completed` event for it.
     SWEEP_INTERVAL_SECONDS: float = float(os.getenv("SWEEP_INTERVAL_SECONDS", "5.0"))
+    DB_PATH: str = os.getenv("CHAOS_DB_PATH", "./data/chaos.db")
 
 
 config = Config()

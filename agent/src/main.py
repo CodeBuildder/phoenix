@@ -36,7 +36,7 @@ from tools import get_running_scenarios
 
 log = structlog.get_logger()
 
-run_store    = RunStore()
+run_store    = RunStore(config.DB_PATH)
 memory_store = MemoryStore(config.DB_PATH)
 
 # Active pipeline tasks keyed by scenario_id
@@ -77,7 +77,11 @@ async def _poller() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    os.makedirs(os.path.dirname(config.DB_PATH), exist_ok=True)
+    if directory := os.path.dirname(config.DB_PATH):
+        os.makedirs(directory, exist_ok=True)
+    interrupted = await run_store.reconcile_interrupted()
+    if interrupted:
+        log.warning("agent_runs_interrupted_by_restart", count=interrupted)
     poller_task = asyncio.create_task(_poller(), name="scenario-poller")
     yield
     poller_task.cancel()
@@ -109,6 +113,7 @@ async def health():
         "service": "phoenix-agent",
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "active_runs": sum(1 for t in _tasks.values() if not t.done()),
+        "persistent_history": config.DB_PATH != ":memory:",
     }
 
 
