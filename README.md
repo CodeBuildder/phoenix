@@ -113,13 +113,21 @@ are `simulator`. A bounded feed updates the dashboards during the presentation. 
 Kubernetes API, Hubble relay, Falco workload, or Chaos Mesh fault is used. `Ctrl-C`
 stops the local services and removes the disposable Redis container.
 
-For the real k3s-backed integration proof instead:
+For the guarded real k3s proof instead:
 
 ```bash
 kubectl config use-context argus
 make -C ../../argus-k8s demo-platform-live-dry-run
 make -C ../../argus-k8s demo-platform-live
 ```
+
+The dry-run is read-only. The live command requires the exact context and the phrase
+`INJECT LIVE FAULT`, creates only `sentinel-live-demo`, and continuously probes a
+two-replica HTTP target. Phoenix must create a real Chaos Mesh `PodChaos` for one
+disposable replica; the proof passes only after Kubernetes supplies a new Ready pod,
+both replicas are Ready, measured availability is recorded, and Sentinel correlates the
+observed Argus evidence with Phoenix's verified recovery. `Ctrl-C` deletes only the
+isolated namespace.
 
 For Phoenix by itself, choose one of the paths below. The local path proves Phoenix's
 safe simulator workflow without touching Kubernetes. The cluster path adds live
